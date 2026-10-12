@@ -351,7 +351,20 @@ class H(BaseHTTPRequestHandler):
             S.npu_lock.release()
 
 
+def watch_parent():
+    """The launcher keeps our stdin open; when it dies for any reason (crash, kill -9, closed terminal) the pipe
+    closes, stdin hits EOF and we exit, so an orphaned server never keeps the NPU locked."""
+    def run():
+        try:
+            sys.stdin.read()
+        finally:
+            os._exit(0)
+    threading.Thread(target=run, daemon=True).start()
+
+
 def main():
+    if os.environ.get("NPU_LAB_WATCH_STDIN") == "1":
+        watch_parent()
     srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
     srv.daemon_threads = True
     print(json.dumps({"port": srv.server_address[1], **({} if os.environ.get("NPU_LAB_TOKEN") else {"token": TOKEN})}), flush=True)

@@ -75,10 +75,13 @@ fn main() {
         .current_dir(&root)
         .env("NPU_LAB_TOKEN", &token)
         .env("NPU_LAB_CODE", &code)
+        .env("NPU_LAB_WATCH_STDIN", "1")
+        .stdin(Stdio::piped()) // held open below: if we die, the pipe closes and the server exits by itself
         .stdout(Stdio::piped())
         .spawn()
         .unwrap_or_else(|e| { eprintln!("could not start the Python engine server: {e}"); std::process::exit(1) });
 
+    let _keep_stdin_open = child.stdin.take(); // must live until main ends
     let stdout = child.stdout.take().expect("piped stdout");
     let mut line = String::new();
     if BufReader::new(stdout).read_line(&mut line).unwrap_or(0) == 0 {
