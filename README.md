@@ -11,6 +11,16 @@ so everything here is built from the low-level pieces.
   with every dense layer offloaded to the NPU. Embeddings match the CPU ones (cosine >= 0.996).
 - Numbers and how to reproduce them: [`bench/RESULTS.md`](bench/RESULTS.md).
 
+## Platform support (read this first)
+| Part | Linux | Windows |
+|---|---|---|
+| NPU backends (kernels, LLM, embeddings) | **Yes**, tested on CachyOS with `amdxdna` + XRT | **Not supported yet.** The NPU is driven by AMD's Ryzen AI stack there, which this project does not use or test |
+| GPU embedding helper (`--device gpu`) | Yes (NVIDIA/CUDA tested) | Untested |
+| CPU fallback (`--device cpu`) | Yes | Should work (plain numpy), untested |
+| Launcher (planned, Rust) | Planned | Planned (portable code; it can only use the backends above that exist on that OS) |
+
+Hardware tested: AMD Ryzen 5 8645HS (XDNA1 / Hawk Point). XDNA2 (Ryzen AI 300) is untested here; the kernels target `npu1`.
+
 ## Modes
 The NPU is the center of the project; GPU/CPU are optional helpers, never required.
 - **LLM chat**: `python src/qwen_npu.py "prompt"` runs Qwen2.5-0.5B-Instruct with every dense layer on the NPU

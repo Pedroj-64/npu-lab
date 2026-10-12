@@ -91,3 +91,23 @@ Other shapes with int8, k=128: 9728x896 479 us (int16/k=32: 1178 us), 896x4864 2
 Qwen2.5-0.5B-Instruct decode, steady: **11.5 tok/s** with int8 weights (7.9-8.0 tok/s with int16, 2.2 on CPU).
 Weight quantization error is ~1% (per-row int8). Switch back with `NPU_INT8=0`.
 Build: `python scripts/build_matvec.py --i8 1152x896 896x896 9728x896 896x4864 6016x896`.
+
+## Context switching was the real cost (found by profiling inside the LLM loop)
+Each matvec measured in isolation vs inside the Qwen loop (int8, 4 columns, one xclbin per shape):
+
+| shape | isolated | in the LLM loop |
+|---|---:|---:|
+| 9728x896 | 479 us | 918 us |
+| 896x4864 | 290 us | 743 us |
+| 1152x896 | 165 us | 616 us |
+| 896x896 | 151 us | 604 us |
+
+A constant ~450 us per call = the NPU reconfiguring whenever the next call uses a different xclbin.
+Also: more cores helps little (4864x896 int8: 1 core 746 us, 2 cores 448 us, 4 cores 291 us, i.e. ~150 us
+fixed + 596 us / cores), so more columns is not the lever.
+
+Two facts that fix it (`scripts/build_matvec.py --shared`):
+1. The xclbin does not depend on M: one built for M=1152 runs M=9728 and M=896 with only the instruction stream swapped.
+2. Two 2-column contexts stay resident at once: alternating A/B costs 1270 us = 821 + 450, no switch penalty.
+
+Qwen2.5-0.5B with one shared 2-column xclbin per K (896 and 4864): **15.6 tok/s** (was 11.5), same answers.

@@ -18,6 +18,7 @@ QMAX, EOS = 511, 151645
 I8 = os.environ.get("NPU_INT8", "1") == "1"   # int8 weights (default) or int16 weights
 WMAX, XMAX = (127, 2047) if I8 else (511, 511)
 LM_CHUNKS = [9728] * 15 + [6016]
+REF_M = {896: 1152, 4864: 896}  # M each shared xclbin was built with (build/c2/, see scripts/build_matvec.py)
 
 
 def load_safetensors(path):
@@ -54,16 +55,26 @@ class Npu:
     """Owns the device and one kernel (context) per matrix shape."""
     def __init__(self):
         import pyxrt
-        self.px, self.dev, self.k = pyxrt, pyxrt.device(0), {}
+        self.px, self.dev, self.k, self.ctx = pyxrt, pyxrt.device(0), {}, {}
         self.t = 0.0
 
     def kernel(self, M, K):
+        """int8: one 2-column context per K (xclbin is M-agnostic, only the instruction stream
+        changes), so two contexts stay resident side by side and the NPU never reconfigures."""
         if (M, K) not in self.k:
             px = self.px
-            name = f"build/mv8/mv8_{M}x{K}_c4" if I8 else f"build/mv/mv_{M}x{K}_c4"
-            xb = px.xclbin(name + ".xclbin")
-            self.dev.register_xclbin(xb)
-            k = px.kernel(px.hw_context(self.dev, xb.get_uuid()), xb.get_kernels()[0].get_name())
+            if I8:
+                ref = REF_M[K]
+                if K not in self.ctx:
+                    xb = px.xclbin(f"build/c2/c2_{ref}x{K}.xclbin")
+                    self.dev.register_xclbin(xb)
+                    self.ctx[K] = px.kernel(px.hw_context(self.dev, xb.get_uuid()), xb.get_kernels()[0].get_name())
+                k, name = self.ctx[K], f"build/c2/c2_{M}x{K}"
+            else:
+                name = f"build/mv/mv_{M}x{K}_c4"
+                xb = px.xclbin(name + ".xclbin")
+                self.dev.register_xclbin(xb)
+                k = px.kernel(px.hw_context(self.dev, xb.get_uuid()), xb.get_kernels()[0].get_name())
             ins = np.fromfile(name + ".bin", dtype=np.uint32)
             bi = px.bo(self.dev, ins.nbytes, px.bo.cacheable, k.group_id(1))
             bi.write(ins.tobytes(), 0)
