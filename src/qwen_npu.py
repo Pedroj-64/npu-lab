@@ -15,6 +15,8 @@ from tokenizers import Tokenizer
 D = "models/qwen"
 H, NL, NH, NKV, HD, FF, EPS, THETA = 896, 24, 14, 2, 64, 4864, 1e-6, 1e6
 QMAX, EOS = 511, 151645
+I8 = os.environ.get("NPU_INT8", "1") == "1"   # int8 weights (default) or int16 weights
+WMAX, XMAX = (127, 2047) if I8 else (511, 511)
 LM_CHUNKS = [9728] * 15 + [6016]
 
 
@@ -34,9 +36,9 @@ def load_safetensors(path):
 
 
 def qmat(W):
-    s = np.abs(W).max(1) / QMAX
+    s = np.abs(W).max(1) / WMAX
     s[s == 0] = 1
-    return np.round(W / s[:, None]).astype(np.int16), s.astype(np.float32)
+    return np.round(W / s[:, None]).astype(np.int8 if I8 else np.int16), s.astype(np.float32)
 
 
 class CpuLin:
@@ -57,7 +59,8 @@ class Npu:
 
     def kernel(self, M, K):
         if (M, K) not in self.k:
-            px, name = self.px, f"build/mv/mv_{M}x{K}_c4"
+            px = self.px
+            name = f"build/mv8/mv8_{M}x{K}_c4" if I8 else f"build/mv/mv_{M}x{K}_c4"
             xb = px.xclbin(name + ".xclbin")
             self.dev.register_xclbin(xb)
             k = px.kernel(px.hw_context(self.dev, xb.get_uuid()), xb.get_kernels()[0].get_name())
@@ -89,7 +92,7 @@ class NpuLin:
 
     def __call__(self, x):
         npu, px = self.npu, self.npu.px
-        sx = np.abs(x).max() / QMAX or 1.0
+        sx = np.abs(x).max() / XMAX or 1.0
         xq = np.round(x / sx).astype(np.int16)
         out = []
         for m, K, bo, s in self.parts:
