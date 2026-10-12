@@ -5,7 +5,9 @@
 // so one 32-byte load holds 8 rows x 4 columns. The core widens it to int16,
 // multiplies it with the matching 4 values of b repeated per row, and sums the
 // four lanes of each row at the end. Halves the weight bytes streamed from RAM.
-// Original idea and structure: mlir-aie aie_kernels/linalg/mv_i16.cc (Apache-2.0 with LLVM exception).
+// Derived in part from mlir-aie aie_kernels/linalg/mv_i16.cc
+// Copyright (C) 2023-2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #define NOCPP
 
