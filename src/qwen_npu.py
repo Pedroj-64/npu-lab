@@ -237,8 +237,15 @@ class Qwen:
             X = X + P["down"]((g / (1 + np.exp(-np.clip(g, -60, 60)))) * u)
         return self.lm(rms(X[-1], self.norm, eps))
 
-    def stream(self, prompt, n):
-        """Yield the answer piece by piece (UTF-8 safe). Timing ends up in self.stats."""
+    def stream(self, prompt, n, context=None):
+        """Yield the answer piece by piece (UTF-8 safe). `context`: [{src, text}] documentation excerpts to ground
+        the answer in. Timing ends up in self.stats."""
+        if context:
+            refs = "\n\n".join(f"[{c['src']}]\n{c['text']}" for c in context)
+            prompt = ("Answer using the reference excerpts below. They come from the manuals installed on this computer, so "
+                      "trust them over your own memory (which may be outdated). Name the source in brackets, e.g. [man:pacman]. "
+                      "If they do not contain the answer, say so instead of guessing commands.\n\n"
+                      f"{refs}\n\nQuestion: {prompt}")
         text = (f"<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n")
         ids = self.tok.encode(text, add_special_tokens=False).ids
         if len(ids) + n >= self.kc.shape[1]:

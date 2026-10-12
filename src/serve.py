@@ -31,6 +31,7 @@ class State:
         self.idx = None
         self.job = {"state": "idle"}              # index job status
         self.stop = threading.Event()
+        self.docs, self.embedder = None, None     # local documentation index + a CPU query embedder (~110 ms per question)
 
     def unload(self):
         self.engine, self.mode, self.model = None, "none", None
@@ -39,6 +40,12 @@ class State:
     def load_index(self):
         import search
         self.idx = search.load()
+
+    def docs_info(self):
+        import docs
+        if self.docs is None:
+            self.docs = docs.load()
+        return None if not self.docs else {"chunks": len(self.docs["text"]), "built": self.docs["built"]}
 
     def index_info(self):
         if self.idx is None:
@@ -115,6 +122,9 @@ def doctor():
             missp = [x for x in prefill_npu.shapes(cfg) if not os.path.exists(os.path.join(ROOT, prefill_npu.xclbin_name(*x) + ".xclbin"))]
             add(f"prefill_{name}", not missp, "all built" if not missp else f"{len(missp)} missing (prompts will be read slowly)",
                 f"python scripts/build_prefill.py {d}")
+    import docs
+    add("docs_index", os.path.exists(docs.IDX), "built" if os.path.exists(docs.IDX) else "not built (chat cannot use local documentation)",
+        "python src/docs.py --device gpu build   (needs the tldr cache: `tldr --update`; optional: sudo pacman -S arch-wiki-docs). Without a GPU use --device npu (slower).")
     emb = os.path.exists(os.path.join(ROOT, "models/multi/model.safetensors"))
     add("model_search", emb, "models/multi" if emb else "models/multi missing",
         "Download sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (model.safetensors, tokenizer.json, config.json) into models/multi/.")
@@ -282,7 +292,7 @@ class H(BaseHTTPRequestHandler):
         import importlib.util
         if self.path == "/status":
             self._send(200, {"mode": S.mode, "model": S.model, "profile": S.profile,
-                             "busy": S.npu_lock.locked(), "index": S.index_info(), "job": S.job,
+                             "busy": S.npu_lock.locked(), "index": S.index_info(), "docs": S.docs_info(), "job": S.job,
                              "gpu_helper": importlib.util.find_spec("torch") is not None,
                              "models": sorted(MODELS)})
         elif self.path == "/rules":
@@ -319,7 +329,7 @@ class H(BaseHTTPRequestHandler):
             raise Bad(404, "not found")
 
     def _chat(self, d):
-        prompt, n = str(d.get("prompt", "")), int(d.get("tokens", 256))
+        prompt, n, use_docs = str(d.get("prompt", "")), int(d.get("tokens", 256)), bool(d.get("docs", False))
         if S.mode != "llm":
             raise Bad(409, "not in llm mode")
         if not prompt.strip() or len(prompt) > MAX_PROMPT or not 1 <= n <= MAX_TOKENS:
@@ -331,7 +341,17 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/x-ndjson")
             self.end_headers()
             try:
-                for piece in S.engine.stream(prompt, n):
+                ctx = None
+                if use_docs:
+                    import docs, search
+                    if S.docs_info() is None:
+                        raise RuntimeError("docs index not built: run `python src/docs.py --device gpu build` (or --device npu)")
+                    if S.embedder is None:
+                        S.embedder = search.make_model("cpu")
+                    ctx = docs.retrieve(S.embedder, prompt, 4, S.docs)
+                    self.wfile.write((json.dumps({"sources": [{"src": c["src"], "title": c["title"], "score": round(c["score"], 3)} for c in ctx]}) + "\n").encode())
+                    self.wfile.flush()
+                for piece in S.engine.stream(prompt, n, ctx):
                     self.wfile.write((json.dumps({"token": piece}) + "\n").encode()); self.wfile.flush()
                 self.wfile.write((json.dumps({"done": True, "stats": S.engine.stats}) + "\n").encode())
             except (BrokenPipeError, ConnectionResetError):

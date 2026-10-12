@@ -54,6 +54,11 @@ try:
         lines = [json.loads(x) for x in body.decode().splitlines() if x]
         text = "".join(x.get("token", "") for x in lines)
         check(f"chat streams an answer ({text.strip()[:40]!r})", s == 200 and "Paris" in text and lines[-1].get("done"))
+        if os.path.exists(os.path.expanduser("~/.local/share/npu-lab/docs.pkl")):
+            s, body = call("POST", "/chat", {"prompt": "¿Cómo instalo un paquete del AUR usando paru?", "tokens": 25, "docs": True})
+            lines = [json.loads(x) for x in body.decode().splitlines() if x]
+            srcs = [x["src"] for x in next((l["sources"] for l in lines if "sources" in l), [])]
+            check(f"chat with local docs reports its sources {srcs[:2]}", s == 200 and any("paru" in x for x in srcs) and lines[-1].get("done"))
         check("switch to search frees the NPU and loads the embedder", call("POST", "/mode", {"mode": "search", "device": "npu"})[0] == 200)
         s, body = call("POST", "/search", {"query": "servidor PHP base de datos", "n": 3})
         res = json.loads(body).get("results", [])

@@ -142,3 +142,9 @@ use 2 columns, which the driver lets share partitions with the decode contexts.
 
 Build: `python scripts/build_prefill.py models/qwen models/qwen15`. Disable with `NPU_PREFILL=0`.
 Needs ~0.7 GB (0.5B) / ~2.6 GB (1.5B) of extra RAM for the bf16 weight copy.
+
+## Local documentation grounding (`src/docs.py`)
+Index: 64,903 chunks (tldr es+en, man sections 1/5/8, Arch wiki), built in 51 s of GPU embedding (~1270 chunks/s on an RTX 3050,
+0.3 GB VRAM) plus ~50 s of CPU to render man pages. Query: ~110 ms on one CPU core. Retrieval puts the right page first for
+"install an AUR package with paru" (0.968), "firewall with nftables" (0.977), tar; weaker for vague queries ("find files by name").
+Prompt with 4 excerpts is ~830 tokens: prefill ~4 s (0.5B) / ~12-20 s (1.5B).

@@ -55,6 +55,8 @@
   <div class="card"><div id="log"></div>
     <div class="row" style="margin-top:12px"><textarea id="prompt" rows="2" placeholder="Ask something… (Enter to send, Shift+Enter for a new line)"></textarea>
     <button class="b pri" id="send">Send</button><button class="b" id="stop" disabled>Stop</button></div>
+    <div class="row" style="margin-top:6px"><label><input type="checkbox" id="usedocs" checked> use local documentation (man, tldr, Arch wiki)</label>
+      <span class="dim" id="docsinfo"></span></div>
     <div class="dim" id="stats" style="margin-top:6px"></div></div>
 </section>
 <section id="search">
@@ -111,6 +113,8 @@ async function refresh() {
   $("profnote").textContent = ST.gpu_helper ? "" : "GPU helper (torch) is not installed; CPU assistance still works.";
   $("llmstate").textContent = ST.mode === "llm" ? "loaded: " + ST.model : "";
   $("sstate").textContent = ST.mode === "search" ? "loaded on " + ST.model : "";
+  $("docsinfo").textContent = ST.docs ? `(${ST.docs.chunks} chunks indexed)` : "(docs index not built — see Setup)";
+  if (!ST.docs) $("usedocs").checked = false;
   $("idxinfo").textContent = `${ST.index.files} files, ${ST.index.chunks} chunks indexed`;
   const j = ST.job || {};
   if (j.state === "running") { const p = j.files_total ? j.files_done / j.files_total : 0; $("idxbar").style.width = (p * 100) + "%";
@@ -139,12 +143,13 @@ async function send() {
   if (!ST || ST.mode !== "llm") { toast("Load a model first"); return; }
   $("prompt").value = ""; addMsg("me", prompt); const out = addMsg("bot", ""); $("send").disabled = true; $("stop").disabled = false; abort = new AbortController();
   try {
-    const r = await fetch("/chat", { method: "POST", signal: abort.signal, headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" }, body: JSON.stringify({ prompt, tokens: 400 }) });
+    const r = await fetch("/chat", { method: "POST", signal: abort.signal, headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" }, body: JSON.stringify({ prompt, tokens: 400, docs: $("usedocs").checked }) });
     if (!r.ok) throw new Error((await r.json()).error || r.statusText);
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) { const { done, value } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });
       let i; while ((i = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line) continue;
         const m = JSON.parse(line);
+        if (m.sources) { const sd = mk("div", "dim", "sources: " + m.sources.map(x => x.src).join(", ")); sd.style.fontSize = "12px"; out.before(sd); }
         if (m.token) { out.textContent += m.token; $("log").scrollTop = 1e9; }
         if (m.error) toast(m.error);
         if (m.done) { const s = m.stats; $("stats").textContent = `${(s.decode_tokens / Math.max(s.decode_s, 1e-9)).toFixed(1)} tok/s · prompt ${s.prefill_tokens} tokens in ${s.prefill_s.toFixed(1)} s`; } } }

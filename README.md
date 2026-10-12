@@ -11,6 +11,16 @@ so everything here is built from the low-level pieces.
   with every dense layer offloaded to the NPU. Embeddings match the CPU ones (cosine >= 0.996).
 - Numbers and how to reproduce them: [`bench/RESULTS.md`](bench/RESULTS.md).
 
+## Why local documentation (frozen knowledge)
+A small model's knowledge stops at its training date (Qwen2.5: around 2023-24) and it confidently invents commands.
+`python src/docs.py --device gpu build` indexes the man pages and `tldr` pages installed on **your** machine (and the
+Arch wiki if `arch-wiki-docs` is installed); in the Chat tab, "use local documentation" retrieves the best excerpts for
+your question (query embedding runs on one CPU core, ~0.1 s), hands them to the model and shows the sources.
+Example (Qwen2.5-1.5B, "how do I install an AUR package with paru"): without docs it invents that AUR is the
+"Arch Linux App Repository" and that `paru` comes from `sudo pacman -S paru`; with docs it answers `paru -S package`.
+Run `tldr --update` first (tealdeer or tldr client). Index build: ~1.5 min with a GPU (CPU part: rendering man pages).
+It is a mitigation, not magic: a 1.5B model can still misread a correct page, so read the cited source and run commands yourself.
+
 ## Platform support (read this first)
 | Part | Linux | Windows |
 |---|---|---|
