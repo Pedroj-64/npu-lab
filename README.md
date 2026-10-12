@@ -90,6 +90,8 @@ The NPU is the center of the project; GPU/CPU are optional helpers, never requir
 - Next: int8 matvec kernel (half the weight bytes), more cores per column, a 1.5B model,
   and a small launcher to pick the mode (LLM / search) and a resource profile (NPU-only / assisted).
 
+See [`ROADMAP.md`](ROADMAP.md) for what is next (per-question routing for docs/web, better memory, evaluation).
+
 License: MIT.
 
 ## Credits
