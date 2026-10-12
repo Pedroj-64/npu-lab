@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from minilm import MiniLM
 
 MODEL = "models/multi"
-CFG = os.path.expanduser("~/.config/npu-lab/rules.json")
+CFG = os.environ.get("NPU_LAB_RULES") or os.path.expanduser("~/.config/npu-lab/rules.json")   # env override is for tests
 IDX = os.path.expanduser("~/.local/share/npu-lab/index.pkl")
 DEFAULT_RULES = {
     "roots": ["~/Documentos"],

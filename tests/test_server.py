@@ -23,7 +23,7 @@ fake = HTTPServer(("127.0.0.1", 0), Fake)
 threading.Thread(target=fake.serve_forever, daemon=True).start()
 TOKEN = "t" * 43
 p = subprocess.Popen([sys.executable, "-u", "src/serve.py"], cwd=ROOT, stdout=subprocess.PIPE, text=True,
-                     env={**os.environ, "NPU_LAB_TOKEN": TOKEN, "NPU_LAB_CODE": "c" * 43,
+                     env={**os.environ, "NPU_LAB_TOKEN": TOKEN, "NPU_LAB_CODE": "c" * 43, "NPU_LAB_RULES": os.path.join(__import__("tempfile").mkdtemp(), "rules.json"),
                                     "NPU_LAB_SETTINGS": os.path.join(__import__("tempfile").mkdtemp(), "providers.json")})
 port = json.loads(p.stdout.readline())["port"]
 
@@ -63,7 +63,10 @@ try:
     check("unknown model refused (no paths from the API)", call("POST", "/mode", {"mode": "llm", "model": "../../etc"})[0] == 400)
     check("GPU/CPU refused under npu_only", call("POST", "/mode", {"mode": "search", "device": "gpu"})[0] == 403)
     check("roots outside $HOME refused", call("POST", "/rules", {"roots": ["/etc"]})[0] == 400)
-    check("whole $HOME refused as root", call("POST", "/rules", {"roots": ["~"]})[0] == 400)
+    s, b = call("POST", "/rules", {"roots": ["~", "~/"]})
+    check("whole $HOME accepted as '~'", s == 200 and json.loads(b)["roots"] == ["~", "~"])
+    check("/home (everyone's homes) refused", call("POST", "/rules", {"roots": ["/home"]})[0] == 400)
+    check("path escaping the home refused", call("POST", "/rules", {"roots": ["~/../.."]})[0] == 400)
     # settings: secrets are write-only
     s, b = call("POST", "/settings", {"cloud": {"providers": {"fake": {"kind": "openai", "base_url": f"http://127.0.0.1:{fake.server_address[1]}/v1", "model": "m", "key": KEY}}, "active": "fake"},
                                       "web": {"provider": "brave", "brave_key": "BRAVE-SECRET-1"}})

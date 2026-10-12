@@ -61,7 +61,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def set_rules(d):
-    """Only two knobs are editable from the UI: which folders may be read (under $HOME) and the GPU VRAM cap."""
+    """Only two knobs are editable from the UI: which folders may be read (your home or inside it) and the GPU VRAM cap."""
     import search
     r = search.rules()
     home = os.path.realpath(os.path.expanduser("~"))
@@ -72,8 +72,8 @@ def set_rules(d):
         clean = []
         for x in roots:
             real = os.path.realpath(os.path.expanduser(str(x)))
-            if real == home or not real.startswith(home + os.sep) or not os.path.isdir(real):
-                raise Bad(400, f"not an existing folder inside your home (and not the whole home): {x}")
+            if not (real == home or real.startswith(home + os.sep)) or not os.path.isdir(real):
+                raise Bad(400, f"must be an existing folder inside your home (use ~ for the whole home): {x}")
             clean.append("~" + real[len(home):])
         r["roots"] = clean
     if "gpu_vram_gb" in d:
