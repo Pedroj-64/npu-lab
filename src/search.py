@@ -91,7 +91,9 @@ def make_model(device):
     return MiniLM(linear=NpuLinear(), d=MODEL, max_len=128, fast_gelu=True)
 
 
-def cmd_index(a):
+def run_index(device="npu", dry=False, progress=None, stop=None, model=None):
+    """(Re)index the folders allowed by the rules. progress(dict) is called every ~100 files;
+    stop() -> True aborts (what is done so far is saved). Returns a summary dict."""
     r = rules()
     found = dict(files(r))
     idx = load()
@@ -99,13 +101,19 @@ def cmd_index(a):
         if p not in found:
             del idx[p]
     todo = [p for p, m in found.items() if p not in idx or idx[p]["mtime"] != m]
-    print(f"{len(found)} files match the rules, {len(todo)} new/changed")
-    if a.dry:
-        return
-    model = make_model(a.device)
-    bs = 256 if a.device == "gpu" else 32
+    out = {"matching": len(found), "todo": len(todo), "chunks_new": 0, "seconds": 0.0, "chunks_total": 0, "aborted": False}
+    if dry:
+        return out
+    model = model or make_model(device)
+    bs = 256 if device == "gpu" else 32
     t0, n = time.perf_counter(), 0
     batch_txt, batch_ref = [], []
+
+    def save():
+        os.makedirs(os.path.dirname(IDX), exist_ok=True)
+        tmp = IDX + ".tmp"
+        pickle.dump(idx, open(tmp, "wb"))
+        os.replace(tmp, IDX)
 
     def flush():
         nonlocal n
@@ -120,6 +128,9 @@ def cmd_index(a):
         batch_txt.clear(); batch_ref.clear()
 
     for j, p in enumerate(todo):
+        if stop and stop():
+            out["aborted"] = True
+            break
         cs = chunks(p)
         idx[p] = {"mtime": found[p], "snip": [c[:300] for c in cs],
                   "emb": np.zeros((len(cs), 384), np.float32)}
@@ -129,15 +140,27 @@ def cmd_index(a):
             if len(batch_txt) >= bs:
                 flush()
         if j % 500 == 499:
-            flush()
-            os.makedirs(os.path.dirname(IDX), exist_ok=True)
-            pickle.dump(idx, open(IDX, "wb"))
-        if j % 200 == 199:
-            print(f"  {j+1}/{len(todo)} files, {n} chunks, {n/(time.perf_counter()-t0):.0f} chunks/s", flush=True)
+            flush(); save()
+        if progress and j % 100 == 99:
+            progress({"files_done": j + 1, "files_total": len(todo), "chunks": n, "rate": n / (time.perf_counter() - t0)})
     flush()
-    os.makedirs(os.path.dirname(IDX), exist_ok=True)
-    pickle.dump(idx, open(IDX, "wb"))
-    print(f"done: {n} chunks in {time.perf_counter()-t0:.0f}s; index has {sum(len(v['snip']) for v in idx.values())} chunks")
+    if out["aborted"]:  # drop entries that were registered but not embedded
+        for p in todo:
+            if p in idx and not idx[p]["emb"].any() and len(idx[p]["snip"]):
+                del idx[p]
+    save()
+    out.update(chunks_new=n, seconds=time.perf_counter() - t0, chunks_total=sum(len(v["snip"]) for v in idx.values()))
+    return out
+
+
+def cmd_index(a):
+    def show(i):
+        print(f"  {i['files_done']}/{i['files_total']} files, {i['chunks']} chunks, {i['rate']:.0f} chunks/s", flush=True)
+    r = run_index(a.device, a.dry, show if not a.dry else None)
+    if a.dry:
+        print(f"{r['matching']} files match the rules, {r['todo']} new/changed")
+    else:
+        print(f"done: {r['chunks_new']} chunks in {r['seconds']:.0f}s; index has {r['chunks_total']} chunks")
 
 
 def words(t):
@@ -151,27 +174,37 @@ def words(t):
 STOP = {"los", "las", "del", "con", "para", "por", "que", "una", "uno", "the", "and", "for", "de", "la", "el"}
 
 
-def cmd_search(a):
-    idx = load()
+def run_search(model, query, n=8, idx=None):
+    """Top-n files for `query`: [{score, path, snippet}]. `model` is anything with .encode([text])."""
+    idx = idx if idx is not None else load()
+    idx = {p: v for p, v in idx.items() if len(v["snip"])}
     if not idx:
-        sys.exit("empty index: run `index` first")
-    q = make_model(a.device).encode([a.query])[0]
+        return []
+    q = model.encode([query])[0]
     paths = [p for p, v in idx.items() for _ in v["snip"]]
     snips = [s for v in idx.values() for s in v["snip"]]
-    embs = np.concatenate([v["emb"] for v in idx.values() if len(v["snip"])])
-    sc = embs @ q
-    qw = words(a.query)
+    sc = np.concatenate([v["emb"] for v in idx.values()]) @ q
+    qw = words(query)
     if qw:  # lexical boost: share of query words that appear in the file path
         pw = {p: len(qw & words(p.replace(os.path.expanduser("~"), ""))) / len(qw) for p in set(paths)}
         sc = sc + 0.25 * np.array([pw[p] for p in paths])
-    seen = set()
+    res, seen = [], set()
     for i in np.argsort(-sc):
         if paths[i] in seen:
             continue
         seen.add(paths[i])
-        print(f"\n{sc[i]:.3f}  {paths[i]}\n    {' '.join(snips[i][:200].split())}")
-        if len(seen) >= a.n:
+        res.append({"score": float(sc[i]), "path": paths[i], "snippet": " ".join(snips[i][:200].split())})
+        if len(res) >= n:
             break
+    return res
+
+
+def cmd_search(a):
+    res = run_search(make_model(a.device), a.query, a.n)
+    if not res:
+        sys.exit("empty index: run `index` first")
+    for r in res:
+        print(f"\n{r['score']:.3f}  {r['path']}\n    {r['snippet']}")
 
 
 if __name__ == "__main__":

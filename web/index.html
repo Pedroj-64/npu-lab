@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>npu-lab</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#272c37; --text:#e6e8ee; --dim:#8b93a5; --ok:#4cc38a; --bad:#ef6a6a; --acc:#6aa7ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid var(--line); background:var(--panel); }
+  header h1 { font-size:16px; margin:0; letter-spacing:.3px; }
+  #pill { margin-left:auto; padding:3px 10px; border-radius:99px; border:1px solid var(--line); color:var(--dim); font-size:12px; }
+  nav { display:flex; gap:4px; padding:0 20px; border-bottom:1px solid var(--line); }
+  nav button { background:none; border:0; color:var(--dim); padding:10px 14px; cursor:pointer; border-bottom:2px solid transparent; font:inherit; }
+  nav button.on { color:var(--text); border-color:var(--acc); }
+  main { max-width:900px; margin:0 auto; padding:20px; }
+  section { display:none; } section.on { display:block; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  h2 { font-size:14px; margin:0 0 10px; color:var(--dim); text-transform:uppercase; letter-spacing:.6px; font-weight:600; }
+  button.b, select, input[type=text], textarea { background:#1f242e; color:var(--text); border:1px solid var(--line); border-radius:7px; padding:7px 12px; font:inherit; }
+  button.b { cursor:pointer; } button.b:hover { border-color:var(--acc); } button.b:disabled { opacity:.45; cursor:default; }
+  button.pri { background:var(--acc); color:#08111f; border-color:var(--acc); font-weight:600; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .chk { display:grid; grid-template-columns:22px 1fr; gap:2px 8px; padding:7px 0; border-bottom:1px solid var(--line); }
+  .chk:last-child { border:0; } .ok { color:var(--ok); } .no { color:var(--bad); }
+  .dim { color:var(--dim); } .fix { grid-column:2; color:var(--dim); font-size:12.5px; }
+  #log { height:380px; overflow:auto; display:flex; flex-direction:column; gap:10px; }
+  .msg { padding:9px 12px; border-radius:9px; white-space:pre-wrap; max-width:92%; }
+  .me { background:#22304a; align-self:flex-end; } .bot { background:#1f242e; }
+  textarea { width:100%; resize:vertical; }
+  .res { padding:9px 0; border-bottom:1px solid var(--line); } .res:last-child { border:0; }
+  .path { color:var(--acc); word-break:break-all; } .score { color:var(--dim); font-size:12px; }
+  .snip { color:var(--dim); font-size:12.5px; word-break:break-word; }
+  .bar { height:8px; background:#1f242e; border-radius:5px; overflow:hidden; } .bar i { display:block; height:100%; width:0; background:var(--acc); }
+  #toast { position:fixed; bottom:16px; right:16px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 14px; display:none; max-width:420px; }
+</style>
+</head>
+<body>
+<header><h1>npu-lab</h1><span class="dim">local AI on your NPU</span><span id="pill">connecting…</span></header>
+<nav id="nav"></nav>
+<main>
+<section id="setup">
+  <div class="card"><h2>System check</h2><div id="doctor" class="dim">checking…</div>
+    <div class="row" style="margin-top:10px"><button class="b" id="recheck">Re-check</button></div></div>
+  <div class="card"><h2>Resource profile</h2>
+    <label><input type="radio" name="prof" value="npu_only"> <b>NPU only</b> <span class="dim">— the NPU does everything; GPU/CPU helpers are disabled</span></label><br>
+    <label><input type="radio" name="prof" value="assisted"> <b>Assisted</b> <span class="dim">— the first big index may use the GPU (VRAM-capped) or CPU; day-to-day stays on the NPU</span></label>
+    <div class="dim" id="profnote" style="margin-top:8px"></div></div>
+</section>
+<section id="chat">
+  <div class="card"><h2>Model</h2><div class="row">
+    <select id="llmsel"></select><button class="b pri" id="loadllm">Load</button><button class="b" id="unload">Unload (free the NPU)</button>
+    <span class="dim" id="llmstate"></span></div></div>
+  <div class="card"><div id="log"></div>
+    <div class="row" style="margin-top:12px"><textarea id="prompt" rows="2" placeholder="Ask something… (Enter to send, Shift+Enter for a new line)"></textarea>
+    <button class="b pri" id="send">Send</button><button class="b" id="stop" disabled>Stop</button></div>
+    <div class="dim" id="stats" style="margin-top:6px"></div></div>
+</section>
+<section id="search">
+  <div class="card"><h2>Search engine</h2><div class="row">
+    <select id="dev"><option value="npu">NPU</option><option value="gpu">GPU</option><option value="cpu">CPU</option></select>
+    <button class="b pri" id="loadsearch">Load search</button><span class="dim" id="sstate"></span></div></div>
+  <div class="card"><div class="row"><input type="text" id="q" style="flex:1" placeholder="Search your files by meaning…"><button class="b pri" id="go">Search</button></div>
+    <div id="results" style="margin-top:12px"></div></div>
+  <div class="card"><h2>Index</h2><div class="dim" id="idxinfo"></div>
+    <div class="row" style="margin:10px 0"><select id="idev"><option value="npu">NPU</option><option value="gpu">GPU (assisted)</option><option value="cpu">CPU (assisted)</option></select>
+    <button class="b" id="idxgo">Index now</button><button class="b" id="idxstop">Stop</button></div>
+    <div class="bar"><i id="idxbar"></i></div><div class="dim" id="idxprog" style="margin-top:6px"></div></div>
+  <div class="card"><h2>Folders that may be read</h2>
+    <div class="dim" style="margin-bottom:8px">One folder per line, inside your home. Secrets, keys, <code>.env</code>, <code>.git</code>, build folders and more are always skipped.</div>
+    <textarea id="roots" rows="4"></textarea><div class="row" style="margin-top:8px"><button class="b" id="saveroots">Save folders</button></div></div>
+</section>
+</main>
+<div id="toast"></div>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const HASH = new URLSearchParams(location.hash.slice(1));
+let TOKEN = HASH.get("token") || sessionStorage.getItem("npu-lab-token") || "";   // sessionStorage: survives reloads of this tab only
+if (location.hash) history.replaceState(null, "", location.pathname);              // keep secrets out of the address bar/history
+async function login() {                                                           // launcher URL carries a one-time code, not the token
+  const code = HASH.get("code"); if (!code) return;
+  const r = await fetch("/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+  if (r.ok) { TOKEN = (await r.json()).token; sessionStorage.setItem("npu-lab-token", TOKEN); }
+}
+let ST = null, abort = null;
+
+function toast(msg, ms = 4000) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = "none", ms); }
+async function api(path, body) {
+  const r = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" },
+                                body: body === undefined ? undefined : JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+
+// ---- tabs
+const TABS = [["setup", "Setup"], ["chat", "Chat"], ["search", "Search"]];
+TABS.forEach(([id, name]) => { const b = mk("button", "", name); b.onclick = () => show(id); b.dataset.t = id; $("nav").append(b); });
+function show(id) { TABS.forEach(([t]) => { $(t).classList.toggle("on", t === id); }); [...$("nav").children].forEach(b => b.classList.toggle("on", b.dataset.t === id)); }
+
+// ---- status
+async function refresh() {
+  try { ST = await api("/status"); } catch (e) { $("pill").textContent = "no connection"; return; }
+  $("pill").textContent = `${ST.mode === "none" ? "idle" : ST.mode + (ST.model ? " · " + ST.model : "")} · ${ST.profile === "npu_only" ? "NPU only" : "assisted"}${ST.busy ? " · busy" : ""}`;
+  document.querySelectorAll("input[name=prof]").forEach(r => r.checked = r.value === ST.profile);
+  const assisted = ST.profile === "assisted";
+  for (const id of ["dev", "idev"]) for (const o of $(id).options) o.disabled = o.value !== "npu" && !assisted;
+  $("profnote").textContent = ST.gpu_helper ? "" : "GPU helper (torch) is not installed; CPU assistance still works.";
+  $("llmstate").textContent = ST.mode === "llm" ? "loaded: " + ST.model : "";
+  $("sstate").textContent = ST.mode === "search" ? "loaded on " + ST.model : "";
+  $("idxinfo").textContent = `${ST.index.files} files, ${ST.index.chunks} chunks indexed`;
+  const j = ST.job || {};
+  if (j.state === "running") { const p = j.files_total ? j.files_done / j.files_total : 0; $("idxbar").style.width = (p * 100) + "%";
+    $("idxprog").textContent = `${j.files_done || 0}/${j.files_total || "?"} files · ${j.chunks || 0} chunks · ${Math.round(j.rate || 0)} chunks/s (${j.device})`; }
+  else if (j.state === "done" || j.state === "aborted") { $("idxbar").style.width = "100%"; $("idxprog").textContent = `${j.state}: ${j.chunks_new} new chunks in ${Math.round(j.seconds)}s`; }
+  else if (j.state === "error") $("idxprog").textContent = "error: " + j.error;
+  $("idxgo").disabled = j.state === "running";
+}
+async function doctor() {
+  const box = $("doctor"); box.textContent = "checking…";
+  try { const { checks } = await api("/doctor"); box.textContent = "";
+    for (const c of checks) { const d = mk("div", "chk"); d.append(mk("span", c.ok ? "ok" : "no", c.ok ? "✔" : "✘"), mk("span", "", c.id.replace("_", " ") + " — " + c.detail));
+      if (c.fix) d.append(mk("span", "fix", c.fix)); box.append(d); }
+  } catch (e) { box.textContent = e.message; }
+}
+document.querySelectorAll("input[name=prof]").forEach(r => r.onchange = async () => { try { await api("/profile", { profile: r.value }); } catch (e) { toast(e.message); } refresh(); });
+$("recheck").onclick = doctor;
+
+// ---- chat
+function addMsg(cls, text) { const m = mk("div", "msg " + cls, text); $("log").append(m); $("log").scrollTop = 1e9; return m; }
+$("loadllm").onclick = async () => { $("loadllm").disabled = true; $("llmstate").textContent = "loading… (10–20 s)";
+  try { await api("/mode", { mode: "llm", model: $("llmsel").value }); toast("Model loaded"); } catch (e) { toast(e.message); } $("loadllm").disabled = false; refresh(); };
+$("unload").onclick = async () => { try { await api("/mode", { mode: "none" }); toast("NPU is free"); } catch (e) { toast(e.message); } refresh(); };
+async function send() {
+  const prompt = $("prompt").value.trim(); if (!prompt || abort) return;
+  if (!ST || ST.mode !== "llm") { toast("Load a model first"); return; }
+  $("prompt").value = ""; addMsg("me", prompt); const out = addMsg("bot", ""); $("send").disabled = true; $("stop").disabled = false; abort = new AbortController();
+  try {
+    const r = await fetch("/chat", { method: "POST", signal: abort.signal, headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" }, body: JSON.stringify({ prompt, tokens: 400 }) });
+    if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;) { const { done, value } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });
+      let i; while ((i = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line) continue;
+        const m = JSON.parse(line);
+        if (m.token) { out.textContent += m.token; $("log").scrollTop = 1e9; }
+        if (m.error) toast(m.error);
+        if (m.done) { const s = m.stats; $("stats").textContent = `${(s.decode_tokens / Math.max(s.decode_s, 1e-9)).toFixed(1)} tok/s · prompt ${s.prefill_tokens} tokens in ${s.prefill_s.toFixed(1)} s`; } } }
+  } catch (e) { if (e.name !== "AbortError") toast(e.message); }
+  abort = null; $("send").disabled = false; $("stop").disabled = true; refresh();
+}
+$("send").onclick = send; $("stop").onclick = () => abort && abort.abort();
+$("prompt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
+
+// ---- search
+$("loadsearch").onclick = async () => { $("loadsearch").disabled = true; $("sstate").textContent = "loading…";
+  try { await api("/mode", { mode: "search", device: $("dev").value }); toast("Search ready"); } catch (e) { toast(e.message); } $("loadsearch").disabled = false; refresh(); };
+async function doSearch() {
+  const q = $("q").value.trim(); if (!q) return; $("results").textContent = "searching…";
+  try { const { results } = await api("/search", { query: q, n: 8 }); $("results").textContent = "";
+    if (!results.length) $("results").textContent = "No results (is the index empty?)";
+    for (const r of results) { const d = mk("div", "res"); d.append(mk("div", "path", r.path), mk("div", "score", "score " + r.score.toFixed(3)), mk("div", "snip", r.snippet)); $("results").append(d); }
+  } catch (e) { $("results").textContent = e.message; }
+}
+$("go").onclick = doSearch; $("q").onkeydown = e => { if (e.key === "Enter") doSearch(); };
+$("idxgo").onclick = async () => { try { await api("/index", { device: $("idev").value }); toast("Indexing started"); } catch (e) { toast(e.message); } refresh(); };
+$("idxstop").onclick = async () => { try { await api("/index/stop", {}); } catch (e) { toast(e.message); } };
+$("saveroots").onclick = async () => { try { const r = await api("/rules", { roots: $("roots").value.split("\n").map(s => s.trim()).filter(Boolean) }); $("roots").value = r.roots.join("\n"); toast("Folders saved"); } catch (e) { toast(e.message); } };
+
+(async function init() {
+  await login();
+  if (!TOKEN) { $("pill").textContent = "not signed in"; toast("Open the address printed by the launcher (its login link works once)."); return; }
+  show("setup");
+  try { const s = await api("/status"); for (const m of s.models) $("llmsel").append(new Option(m === "qwen" ? "Qwen2.5-0.5B (fast)" : m === "qwen15" ? "Qwen2.5-1.5B (better)" : m, m));
+    $("roots").value = (await api("/rules")).roots.join("\n"); } catch (e) { toast(e.message); }
+  doctor(); refresh(); setInterval(refresh, 1500);
+})();
+</script>
+</body>
+</html>

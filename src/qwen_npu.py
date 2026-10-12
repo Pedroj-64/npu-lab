@@ -181,25 +181,41 @@ class Qwen:
             x = x + L["down"]((g_ / (1 + np.exp(-np.clip(g_, -60, 60)))) * u_)
         return self.lm(rms(x, self.norm, self.eps))
 
-    def generate(self, prompt, n):
+    def stream(self, prompt, n):
+        """Yield the answer piece by piece (UTF-8 safe). Timing ends up in self.stats."""
         text = (f"<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n")
         ids = self.tok.encode(text, add_special_tokens=False).ids
+        if len(ids) + n >= self.kc.shape[1]:
+            raise ValueError(f"prompt ({len(ids)} tokens) + answer exceeds the {self.kc.shape[1]}-token context")
         t0 = time.perf_counter(); out = []
         for pos, t in enumerate(ids):                     # prefill, one token at a time
             logits = self.step(t, pos)
         t_pre = time.perf_counter() - t0
-        t1 = time.perf_counter()
+        t1, sent = time.perf_counter(), ""
+        self.stats = {"prefill_tokens": len(ids), "prefill_s": t_pre, "decode_tokens": 0, "decode_s": 0.0}
         for j in range(n):
             nxt = int(np.argmax(logits))
             if nxt == EOS:
                 break
             out.append(nxt)
+            self.stats.update(decode_tokens=len(out), decode_s=time.perf_counter() - t1)
+            full = self.tok.decode(out)
+            if not full.endswith("\ufffd"):               # wait for the rest of a multi-byte character
+                yield full[len(sent):]
+                sent = full
             logits = self.step(nxt, len(ids) + j)
-        dt = time.perf_counter() - t1
-        print(f"[prefill {len(ids)} tok {t_pre:.1f}s | decode {len(out)} tok {dt:.1f}s = "
-              f"{len(out)/max(dt, 1e-9):.2f} tok/s" + (f" | NPU calls {self.npu.t:.1f}s total]" if self.npu else "]"),
-              file=sys.stderr)
-        return self.tok.decode(out)
+        self.stats["decode_s"] = time.perf_counter() - t1
+        full = self.tok.decode(out)
+        if len(full) > len(sent):
+            yield full[len(sent):]
+
+    def generate(self, prompt, n):
+        text = "".join(self.stream(prompt, n))
+        st = self.stats
+        print(f"[prefill {st['prefill_tokens']} tok {st['prefill_s']:.1f}s | decode {st['decode_tokens']} tok "
+              f"{st['decode_s']:.1f}s = {st['decode_tokens']/max(st['decode_s'], 1e-9):.2f} tok/s"
+              + (f" | NPU calls {self.npu.t:.1f}s total]" if self.npu else "]"), file=sys.stderr)
+        return text
 
 
 if __name__ == "__main__":
