@@ -21,6 +21,21 @@ so everything here is built from the low-level pieces.
 
 Hardware tested: AMD Ryzen 5 8645HS (XDNA1 / Hawk Point). XDNA2 (Ryzen AI 300) is untested here; the kernels target `npu1`.
 
+## Quick start (launcher + web UI)
+```
+cd launcher && cargo build --release && cd ..      # one small binary (Rust)
+./launcher/target/release/npu                     # starts the local server and opens your browser
+```
+The page (`http://127.0.0.1:<random port>/`) walks you through a **system check** (NPU, XRT, memory limit, kernels,
+models, with the exact fix for anything missing), lets you pick the **resource profile** (NPU only / assisted),
+**load one mode at a time** (LLM chat or semantic search; switching frees the NPU), chat, search, run the index
+and choose which folders may be read. Press Ctrl+C in the terminal to stop it.
+
+Security: the server listens on `127.0.0.1` only and every API call needs a random token; the link the launcher
+prints carries a **one-time code** (it works once, then it is useless); foreign `Host`/`Origin` headers are refused;
+the API never accepts file paths for models and only lets you read folders inside your home.
+`python tests/test_server.py` checks all of this plus a real NPU round trip.
+
 ## Modes
 The NPU is the center of the project; GPU/CPU are optional helpers, never required.
 - **LLM chat**: `python src/qwen_npu.py "prompt"` runs Qwen2.5-Instruct with every dense layer on the NPU

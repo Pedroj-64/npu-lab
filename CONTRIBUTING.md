@@ -22,8 +22,8 @@ custom kernels. Small, measured, reproducible contributions are the most useful.
 
 ## Workflow
 1. Fork, create a branch, make a focused change.
-2. Run the relevant checks: `python src/minilm.py models/multi`, `python bench/matvec8_npu.py ...`,
-   `python src/qwen_npu.py "prompt"` (see the README for setup).
+2. Run the relevant checks: `python tests/test_server.py`, `cd launcher && cargo test`, `python src/minilm.py models/multi`,
+   `python bench/matvec8_npu.py ...`, `python src/qwen_npu.py "prompt"` (see the README for setup).
 3. Open a pull request describing the change and the numbers.
 
 Commit messages: a clear English subject line; a second-language line is welcome but optional.

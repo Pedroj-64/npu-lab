@@ -1,0 +1,15 @@
+[package]
+name = "npu"
+version = "0.1.0"
+edition = "2021"
+description = "Launcher for npu-lab: starts the local engine server and opens the web UI"
+license = "MIT"
+
+[dependencies]
+getrandom = "0.3"
+ctrlc = "3"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
