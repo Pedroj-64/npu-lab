@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.xclbin
+build/
+third_party/
+models/
