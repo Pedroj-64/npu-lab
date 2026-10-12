@@ -23,8 +23,10 @@ Hardware tested: AMD Ryzen 5 8645HS (XDNA1 / Hawk Point). XDNA2 (Ryzen AI 300) i
 
 ## Modes
 The NPU is the center of the project; GPU/CPU are optional helpers, never required.
-- **LLM chat**: `python src/qwen_npu.py "prompt"` runs Qwen2.5-0.5B-Instruct with every dense layer on the NPU
-  (~8 tok/s, ~0.3 CPU cores). The assistant answers in Spanish by default.
+- **LLM chat**: `python src/qwen_npu.py "prompt"` runs Qwen2.5-Instruct with every dense layer on the NPU
+  (int8 weights): 0.5B ~15.7 tok/s, 1.5B (`--model models/qwen15`) ~6.3 tok/s, ~0.3 CPU cores.
+  The assistant answers in Spanish by default. Kernels for a model: `python src/qwen_npu.py --model DIR --shapes`
+  lists them, `scripts/build_matvec.py --shared ...` builds them.
 - **Semantic file search**: `python src/search.py index` then `python src/search.py search "query"`.
   Embeddings run on the NPU. What may be read is controlled by `~/.config/npu-lab/rules.json`
   (allowed roots/extensions, denied folders and file names, secret-looking chunks are skipped);

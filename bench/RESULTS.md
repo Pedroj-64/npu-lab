@@ -111,3 +111,17 @@ Two facts that fix it (`scripts/build_matvec.py --shared`):
 2. Two 2-column contexts stay resident at once: alternating A/B costs 1270 us = 821 + 450, no switch penalty.
 
 Qwen2.5-0.5B with one shared 2-column xclbin per K (896 and 4864): **15.6 tok/s** (was 11.5), same answers.
+
+## Qwen2.5-1.5B-Instruct on the NPU
+Same engine (`src/qwen_npu.py --model models/qwen15`), int8 weights, two resident 2-column contexts (K=1536 and K=8960).
+Weights are streamed layer by layer: peak RSS 2.4 GB, ~0.36 CPU cores on average.
+
+| model | decode | prefill | note |
+|---|---:|---:|---|
+| Qwen2.5-0.5B-Instruct | 15.7 tok/s | ~15 tok/s | |
+| Qwen2.5-1.5B-Instruct | **6.3 tok/s** | ~6.5 tok/s | clearly better answers |
+
+Prefill is one token at a time (same speed as decode); batching it is the obvious next speedup.
+Build the kernels for any Qwen2.5 size with:
+`python scripts/build_matvec.py --shared $(python src/qwen_npu.py --model models/qwen15 --shapes)`
+(sizes whose M is not a multiple of 64 or K not a multiple of 128 need padding, not handled yet).

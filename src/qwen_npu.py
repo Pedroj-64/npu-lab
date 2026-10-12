@@ -1,10 +1,12 @@
-"""Qwen2.5-0.5B-Instruct decoding with the dense matvecs on the XDNA1 NPU.
+"""Qwen2.5-Instruct decoding with every dense matvec on the XDNA1 NPU.
 
-usage: python src/qwen_npu.py [--cpu] [--tokens N] "prompt"
+  python src/qwen_npu.py [--model models/qwen] [--tokens N] "prompt"
+  python src/qwen_npu.py --model models/qwen15 --shapes     # kernels to build for that model
 
-Weights are int16 (+-511, per-row scale), activations int16 (+-511, per-vector scale),
-int32 accumulate. Attention, norms, RoPE, SiLU and sampling (greedy) run in numpy.
---cpu runs the same model in float32 numpy, to compare outputs.
+Weights int8 (per-row scale), activations int16 (per-vector scale), int32 accumulate.
+Attention, norms, RoPE, SiLU and (greedy) sampling run in numpy. Weights are streamed layer by
+layer so a 1.5B model never needs its float32 copy in RAM. --cpu runs a float32 numpy reference
+(only sensible for the 0.5B model).
 """
 import argparse, json, os, struct, sys, time
 for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):  # keep the CPU light: the NPU does the work
@@ -12,34 +14,46 @@ for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):  # keep the CPU light: the
 import numpy as np
 from tokenizers import Tokenizer
 
-D = "models/qwen"
-H, NL, NH, NKV, HD, FF, EPS, THETA = 896, 24, 14, 2, 64, 4864, 1e-6, 1e6
-QMAX, EOS = 511, 151645
-I8 = os.environ.get("NPU_INT8", "1") == "1"   # int8 weights (default) or int16 weights
-WMAX, XMAX = (127, 2047) if I8 else (511, 511)
-LM_CHUNKS = [9728] * 15 + [6016]
-REF_M = {896: 1152, 4864: 896}  # M each shared xclbin was built with (build/c2/, see scripts/build_matvec.py)
+EOS, WMAX, XMAX = 151645, 127, 2047
+SYSTEM = ("You are a helpful local assistant running on the user's own NPU. "
+          "Always answer in Spanish unless the user writes in another language or asks for one.")
+LM_ROWS = 9728                    # lm_head is split in chunks of this many rows (+ remainder)
+BUILD = "build/c2"                # 2-column int8 kernels, see scripts/build_matvec.py --shared
 
 
-def load_safetensors(path):
-    """Minimal reader (numpy can't read bf16); yields (name, float32 array)."""
-    f = open(path, "rb")
-    n = struct.unpack("<Q", f.read(8))[0]
-    hdr = json.loads(f.read(n))
-    base = 8 + n
-    hdr.pop("__metadata__", None)
-    for name, m in hdr.items():
+class Weights:
+    """Lazy bf16 safetensors reader: get(name) -> float32 array."""
+    def __init__(self, path):
+        self.f = open(path, "rb")
+        n = struct.unpack("<Q", self.f.read(8))[0]
+        self.h = json.loads(self.f.read(n))
+        self.h.pop("__metadata__", None)
+        self.base = 8 + n
+
+    def get(self, name):
+        m = self.h[name]
         a, b = m["data_offsets"]
-        f.seek(base + a)
-        raw = np.frombuffer(f.read(b - a), dtype=np.uint16)
         assert m["dtype"] == "BF16", m["dtype"]
-        yield name, (raw.astype(np.uint32) << 16).view(np.float32).reshape(m["shape"])
+        self.f.seek(self.base + a)
+        raw = np.frombuffer(self.f.read(b - a), dtype=np.uint16)
+        return (raw.astype(np.uint32) << 16).view(np.float32).reshape(m["shape"])
 
 
 def qmat(W):
     s = np.abs(W).max(1) / WMAX
     s[s == 0] = 1
-    return np.round(W / s[:, None]).astype(np.int8 if I8 else np.int16), s.astype(np.float32)
+    return np.round(W / s[:, None]).astype(np.int8), s.astype(np.float32)
+
+
+def lm_chunks(vocab):
+    return [LM_ROWS] * (vocab // LM_ROWS) + ([vocab % LM_ROWS] if vocab % LM_ROWS else [])
+
+
+def shapes(c):
+    """(M, K) of every matvec this model needs."""
+    H, FF = c["hidden_size"], c["intermediate_size"]
+    kv = c["num_key_value_heads"] * (H // c["num_attention_heads"])
+    return sorted({(H + 2 * kv, H), (H, H), (2 * FF, H), (H, FF)} | {(m, H) for m in lm_chunks(c["vocab_size"])})
 
 
 class CpuLin:
@@ -52,29 +66,21 @@ class CpuLin:
 
 
 class Npu:
-    """Owns the device and one kernel (context) per matrix shape."""
+    """Owns the device. One 2-column context per K, kept resident: the xclbin does not depend on M
+    (only the instruction stream does), so the NPU never reconfigures between layers."""
     def __init__(self):
         import pyxrt
         self.px, self.dev, self.k, self.ctx = pyxrt, pyxrt.device(0), {}, {}
         self.t = 0.0
 
     def kernel(self, M, K):
-        """int8: one 2-column context per K (xclbin is M-agnostic, only the instruction stream
-        changes), so two contexts stay resident side by side and the NPU never reconfigures."""
         if (M, K) not in self.k:
-            px = self.px
-            if I8:
-                ref = REF_M[K]
-                if K not in self.ctx:
-                    xb = px.xclbin(f"build/c2/c2_{ref}x{K}.xclbin")
-                    self.dev.register_xclbin(xb)
-                    self.ctx[K] = px.kernel(px.hw_context(self.dev, xb.get_uuid()), xb.get_kernels()[0].get_name())
-                k, name = self.ctx[K], f"build/c2/c2_{M}x{K}"
-            else:
-                name = f"build/mv/mv_{M}x{K}_c4"
+            px, name = self.px, f"{BUILD}/c2_{M}x{K}"
+            if K not in self.ctx:
                 xb = px.xclbin(name + ".xclbin")
                 self.dev.register_xclbin(xb)
-                k = px.kernel(px.hw_context(self.dev, xb.get_uuid()), xb.get_kernels()[0].get_name())
+                self.ctx[K] = px.kernel(px.hw_context(self.dev, xb.get_uuid()), xb.get_kernels()[0].get_name())
+            k = self.ctx[K]
             ins = np.fromfile(name + ".bin", dtype=np.uint32)
             bi = px.bo(self.dev, ins.nbytes, px.bo.cacheable, k.group_id(1))
             bi.write(ins.tobytes(), 0)
@@ -86,13 +92,10 @@ class Npu:
 
 
 class NpuLin:
-    def __init__(self, npu, W, b=None):
-        self.npu, self.b = npu, b
-        self.parts = []
-        px = npu.px
-        chunks = LM_CHUNKS if W.shape[0] == 151936 else [W.shape[0]]
-        r = 0
-        for m in chunks:
+    def __init__(self, npu, W, b=None, chunks=None):
+        self.npu, self.b, self.parts = npu, b, []
+        px, r = npu.px, 0
+        for m in chunks or [W.shape[0]]:
             q, s = qmat(W[r:r + m])
             k, *_ = npu.kernel(m, W.shape[1])
             bo = px.bo(npu.dev, q.nbytes, px.bo.host_only, k.group_id(3))
@@ -120,67 +123,66 @@ class NpuLin:
         return y if self.b is None else y + self.b
 
 
-def rms(x, w):
-    return x / np.sqrt((x * x).mean() + EPS) * w
+def rms(x, w, eps):
+    return x / np.sqrt((x * x).mean() + eps) * w
 
 
-def rope_tables(pos):
-    inv = 1.0 / THETA ** (np.arange(0, HD, 2) / HD)
-    a = pos * inv
+def rope_tables(pos, hd, theta):
+    a = pos * (1.0 / theta ** (np.arange(0, hd, 2) / hd))
     return np.concatenate([np.cos(a)] * 2).astype(np.float32), np.concatenate([np.sin(a)] * 2).astype(np.float32)
 
 
-def rope(x, c, s):  # x: (heads, HD)
-    h = HD // 2
+def rope(x, c, s):  # x: (heads, hd)
+    h = x.shape[1] // 2
     return x * c + np.concatenate([-x[:, h:], x[:, :h]], 1) * s
 
 
 class Qwen:
-    def __init__(self, cpu=False):
+    def __init__(self, d="models/qwen", cpu=False, max_ctx=4096):
+        c = json.load(open(f"{d}/config.json"))
+        self.H, self.NL, self.NH, self.NKV = c["hidden_size"], c["num_hidden_layers"], c["num_attention_heads"], c["num_key_value_heads"]
+        self.HD, self.FF, self.eps, self.theta = self.H // self.NH, c["intermediate_size"], c["rms_norm_eps"], c["rope_theta"]
         self.npu = None if cpu else Npu()
-        mk = (lambda W, b=None: CpuLin(W, b)) if cpu else (lambda W, b=None: NpuLin(self.npu, W, b))
-        self.tok = Tokenizer.from_file(f"{D}/tokenizer.json")
-        raw = dict(load_safetensors(f"{D}/model.safetensors"))
-        self.embed = raw["model.embed_tokens.weight"]
-        self.norm = raw["model.norm.weight"]
+        mk = (lambda W, b=None, chunks=None: CpuLin(W, b)) if cpu else (lambda W, b=None, chunks=None: NpuLin(self.npu, W, b, chunks))
+        self.tok = Tokenizer.from_file(f"{d}/tokenizer.json")
+        w = Weights(f"{d}/model.safetensors")
+        self.embed, self.norm = w.get("model.embed_tokens.weight"), w.get("model.norm.weight")
         self.layers = []
-        for i in range(NL):
+        for i in range(self.NL):
             p = f"model.layers.{i}."
-            g = lambda n: raw.pop(p + n)
-            qw, kw, vw = (raw.pop(p + f"self_attn.{n}_proj.weight") for n in "qkv")
-            qb, kb, vb = (raw.pop(p + f"self_attn.{n}_proj.bias") for n in "qkv")
+            g = lambda n: w.get(p + n)
             self.layers.append(dict(
                 ln1=g("input_layernorm.weight"), ln2=g("post_attention_layernorm.weight"),
-                qkv=mk(np.concatenate([qw, kw, vw]), np.concatenate([qb, kb, vb])),
+                qkv=mk(np.concatenate([g(f"self_attn.{n}_proj.weight") for n in "qkv"]),
+                       np.concatenate([g(f"self_attn.{n}_proj.bias") for n in "qkv"])),
                 o=mk(g("self_attn.o_proj.weight")),
                 gu=mk(np.concatenate([g("mlp.gate_proj.weight"), g("mlp.up_proj.weight")])),
                 down=mk(g("mlp.down_proj.weight"))))
-        self.lm = mk(self.embed)
-        self.kc = np.zeros((NL, 4096, NKV, HD), np.float32)
+        self.lm = mk(self.embed, chunks=None if cpu else lm_chunks(c["vocab_size"]))  # tied embeddings
+        self.kc = np.zeros((self.NL, max_ctx, self.NKV, self.HD), np.float32)
         self.vc = np.zeros_like(self.kc)
 
     def step(self, tok, pos):
+        H, NH, NKV, HD, FF = self.H, self.NH, self.NKV, self.HD, self.FF
         x = self.embed[tok].copy()
-        c, s = rope_tables(pos)
+        c, s = rope_tables(pos, HD, self.theta)
+        rep = NH // NKV
         for i, L in enumerate(self.layers):
-            qkv = L["qkv"](rms(x, L["ln1"]))
+            qkv = L["qkv"](rms(x, L["ln1"], self.eps))
             q = rope(qkv[:H].reshape(NH, HD), c, s)
             self.kc[i, pos] = rope(qkv[H:H + NKV * HD].reshape(NKV, HD), c, s)
             self.vc[i, pos] = qkv[H + NKV * HD:].reshape(NKV, HD)
             K, V = self.kc[i, :pos + 1], self.vc[i, :pos + 1]       # (T, NKV, HD)
-            rep = NH // NKV
             sc = np.einsum("hd,thd->ht", q, np.repeat(K, rep, 1)) / np.sqrt(HD)
             sc = np.exp(sc - sc.max(1, keepdims=True)); sc /= sc.sum(1, keepdims=True)
-            att = np.einsum("ht,thd->hd", sc, np.repeat(V, rep, 1)).reshape(-1)
-            x = x + L["o"](att)
-            gu = L["gu"](rms(x, L["ln2"]))
+            x = x + L["o"](np.einsum("ht,thd->hd", sc, np.repeat(V, rep, 1)).reshape(-1))
+            gu = L["gu"](rms(x, L["ln2"], self.eps))
             g_, u_ = gu[:FF], gu[FF:]
-            x = x + L["down"]((g_ / (1 + np.exp(-g_))) * u_)
-        return self.lm(rms(x, self.norm))
+            x = x + L["down"]((g_ / (1 + np.exp(-np.clip(g_, -60, 60)))) * u_)
+        return self.lm(rms(x, self.norm, self.eps))
 
     def generate(self, prompt, n):
-        text = ("<|im_start|>system\nYou are a helpful local assistant running on the user's own NPU. Always answer in Spanish unless the user writes in another language or asks for one.<|im_end|>\n"
-                f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n")
+        text = (f"<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n")
         ids = self.tok.encode(text, add_special_tokens=False).ids
         t0 = time.perf_counter(); out = []
         for pos, t in enumerate(ids):                     # prefill, one token at a time
@@ -195,7 +197,7 @@ class Qwen:
             logits = self.step(nxt, len(ids) + j)
         dt = time.perf_counter() - t1
         print(f"[prefill {len(ids)} tok {t_pre:.1f}s | decode {len(out)} tok {dt:.1f}s = "
-              f"{len(out)/dt:.2f} tok/s" + (f" | NPU calls {self.npu.t:.1f}s total]" if self.npu else "]"),
+              f"{len(out)/max(dt, 1e-9):.2f} tok/s" + (f" | NPU calls {self.npu.t:.1f}s total]" if self.npu else "]"),
               file=sys.stderr)
         return self.tok.decode(out)
 
@@ -203,10 +205,15 @@ class Qwen:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("prompt", nargs="?", default="What is the capital of France? Answer in one sentence.")
+    ap.add_argument("--model", default="models/qwen")
     ap.add_argument("--cpu", action="store_true")
+    ap.add_argument("--shapes", action="store_true", help="print the MxK kernels to build and exit")
     ap.add_argument("--tokens", type=int, default=32)
     a = ap.parse_args()
+    if a.shapes:
+        print(" ".join(f"{m}x{k}" for m, k in shapes(json.load(open(f"{a.model}/config.json")))))
+        sys.exit()
     t = time.perf_counter()
-    m = Qwen(cpu=a.cpu)
+    m = Qwen(a.model, cpu=a.cpu)
     print(f"[loaded in {time.perf_counter()-t:.0f}s]", file=sys.stderr)
     print(m.generate(a.prompt, a.tokens))
