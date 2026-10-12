@@ -41,7 +41,8 @@ The NPU is the center of the project; GPU/CPU are optional helpers, never requir
 - **LLM chat**: `python src/qwen_npu.py "prompt"` runs Qwen2.5-Instruct with every dense layer on the NPU
   (int8 weights): 0.5B ~15.7 tok/s, 1.5B (`--model models/qwen15`) ~6.3 tok/s, ~0.3 CPU cores.
   The assistant answers in Spanish by default. Kernels for a model: `python src/qwen_npu.py --model DIR --shapes`
-  lists them, `scripts/build_matvec.py --shared ...` builds them.
+  lists them, `scripts/build_matvec.py --shared ...` builds them; `scripts/build_prefill.py DIR` builds the
+  prompt-reading kernels (bf16 matmuls, ~170 tok/s on the 0.5B, ~56 tok/s on the 1.5B instead of reading token by token).
 - **Semantic file search**: `python src/search.py index` then `python src/search.py search "query"`.
   Embeddings run on the NPU. What may be read is controlled by `~/.config/npu-lab/rules.json`
   (allowed roots/extensions, denied folders and file names, secret-looking chunks are skipped);

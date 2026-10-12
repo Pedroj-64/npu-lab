@@ -8,6 +8,7 @@ These keep their original license and copyright header; our modifications to the
 | File | Derived from | License |
 |---|---|---|
 | `src/kernels/matvec.py`, `src/kernels/matvec_i8.py` | [mlir-aie](https://github.com/Xilinx/mlir-aie) `programming_examples/basic/matrix_multiplication/matrix_vector` | Apache-2.0 WITH LLVM-exception, (c) Advanced Micro Devices, Inc. |
+| `src/kernels/matmul_whole_array.py` | mlir-aie `programming_examples/basic/matrix_multiplication/whole_array` | Apache-2.0 WITH LLVM-exception, (c) Advanced Micro Devices, Inc. |
 | `src/kernels/mv_i8.cc` | mlir-aie `aie_kernels/linalg/mv_i16.cc` | Apache-2.0 WITH LLVM-exception, (c) Advanced Micro Devices, Inc. |
 
 ## Not included, downloaded by the user

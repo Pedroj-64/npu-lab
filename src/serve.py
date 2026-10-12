@@ -101,6 +101,7 @@ def doctor():
     except ImportError:
         add("memlock", False, "not applicable here", "")
     from qwen_npu import shapes
+    import prefill_npu
     for name, d in MODELS.items():
         has_model = os.path.exists(os.path.join(ROOT, d, "model.safetensors"))
         add(f"model_{name}", has_model, d if has_model else f"{d}/model.safetensors missing",
@@ -110,6 +111,10 @@ def doctor():
             miss = [n for n in need if not os.path.exists(os.path.join(ROOT, "build/c2", n + ".xclbin"))]
             add(f"kernels_{name}", not miss, "all built" if not miss else f"{len(miss)} missing",
                 f"python scripts/build_matvec.py --shared $(python src/qwen_npu.py --model {d} --shapes)")
+            cfg = json.load(open(os.path.join(ROOT, d, "config.json")))
+            missp = [x for x in prefill_npu.shapes(cfg) if not os.path.exists(os.path.join(ROOT, prefill_npu.xclbin_name(*x) + ".xclbin"))]
+            add(f"prefill_{name}", not missp, "all built" if not missp else f"{len(missp)} missing (prompts will be read slowly)",
+                f"python scripts/build_prefill.py {d}")
     emb = os.path.exists(os.path.join(ROOT, "models/multi/model.safetensors"))
     add("model_search", emb, "models/multi" if emb else "models/multi missing",
         "Download sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (model.safetensors, tokenizer.json, config.json) into models/multi/.")

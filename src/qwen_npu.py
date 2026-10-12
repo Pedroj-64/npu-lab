@@ -21,6 +21,10 @@ LM_ROWS = 9728                    # lm_head is split in chunks of this many rows
 BUILD = "build/c2"                # 2-column int8 kernels, see scripts/build_matvec.py --shared
 
 
+def f32(raw_bf16):
+    return (raw_bf16.astype(np.uint32) << 16).view(np.float32)
+
+
 class Weights:
     """Lazy bf16 safetensors reader: get(name) -> float32 array."""
     def __init__(self, path):
@@ -30,13 +34,16 @@ class Weights:
         self.h.pop("__metadata__", None)
         self.base = 8 + n
 
-    def get(self, name):
+    def raw(self, name):
+        """The bf16 tensor exactly as stored, as uint16."""
         m = self.h[name]
         a, b = m["data_offsets"]
         assert m["dtype"] == "BF16", m["dtype"]
         self.f.seek(self.base + a)
-        raw = np.frombuffer(self.f.read(b - a), dtype=np.uint16)
-        return (raw.astype(np.uint32) << 16).view(np.float32).reshape(m["shape"])
+        return np.frombuffer(self.f.read(b - a), dtype=np.uint16).reshape(m["shape"])
+
+    def get(self, name):
+        return f32(self.raw(name))
 
 
 def qmat(W):
@@ -147,17 +154,37 @@ class Qwen:
         self.tok = Tokenizer.from_file(f"{d}/tokenizer.json")
         w = Weights(f"{d}/model.safetensors")
         self.embed, self.norm = w.get("model.embed_tokens.weight"), w.get("model.norm.weight")
+        self.pf = None
+        if not cpu and os.environ.get("NPU_PREFILL", "1") == "1":
+            try:
+                import prefill_npu as P
+                miss = [x for x in P.shapes(c) if not os.path.exists(P.xclbin_name(*x) + ".xclbin")]
+                if miss:
+                    print(f"[prefill kernels missing {miss}; run scripts/build_prefill.py {d}. Using slow token-by-token prefill]", file=sys.stderr)
+                else:
+                    self.pf = P.PrefillNpu(self.npu)
+            except Exception as e:
+                print(f"[batched prefill disabled: {type(e).__name__}: {e}]", file=sys.stderr)
         self.layers = []
         for i in range(self.NL):
             p = f"model.layers.{i}."
-            g = lambda n: w.get(p + n)
-            self.layers.append(dict(
-                ln1=g("input_layernorm.weight"), ln2=g("post_attention_layernorm.weight"),
-                qkv=mk(np.concatenate([g(f"self_attn.{n}_proj.weight") for n in "qkv"]),
-                       np.concatenate([g(f"self_attn.{n}_proj.bias") for n in "qkv"])),
-                o=mk(g("self_attn.o_proj.weight")),
-                gu=mk(np.concatenate([g("mlp.gate_proj.weight"), g("mlp.up_proj.weight")])),
-                down=mk(g("mlp.down_proj.weight"))))
+            r = lambda n: w.raw(p + n)
+            qkv_w = np.concatenate([r(f"self_attn.{n}_proj.weight") for n in "qkv"])
+            qkv_b = np.concatenate([w.get(p + f"self_attn.{n}_proj.bias") for n in "qkv"])
+            o_w, g_w, u_w, d_w = r("self_attn.o_proj.weight"), r("mlp.gate_proj.weight"), r("mlp.up_proj.weight"), r("mlp.down_proj.weight")
+            L = dict(ln1=w.get(p + "input_layernorm.weight"), ln2=w.get(p + "post_attention_layernorm.weight"),
+                     qkv=mk(f32(qkv_w), qkv_b), o=mk(f32(o_w)), gu=mk(f32(np.concatenate([g_w, u_w]))), down=mk(f32(d_w)))
+            if self.pf:
+                try:
+                    from prefill_npu import PrefillLin
+                    L["p"] = dict(qkv=PrefillLin(self.pf, qkv_w, qkv_b), o=PrefillLin(self.pf, o_w),
+                                  gate=PrefillLin(self.pf, g_w), up=PrefillLin(self.pf, u_w), down=PrefillLin(self.pf, d_w))
+                except Exception as e:      # e.g. the NPU has no free columns for the extra contexts
+                    print(f"[batched prefill disabled: {type(e).__name__}: {e}]", file=sys.stderr)
+                    self.pf = None
+                    for prev in self.layers:
+                        prev.pop("p", None)
+            self.layers.append(L)
         self.lm = mk(self.embed, chunks=None if cpu else lm_chunks(c["vocab_size"]))  # tied embeddings
         self.kc = np.zeros((self.NL, max_ctx, self.NKV, self.HD), np.float32)
         self.vc = np.zeros_like(self.kc)
@@ -181,6 +208,35 @@ class Qwen:
             x = x + L["down"]((g_ / (1 + np.exp(-np.clip(g_, -60, 60)))) * u_)
         return self.lm(rms(x, self.norm, self.eps))
 
+    def prefill(self, ids):
+        """Process the whole prompt at once (matmuls on the NPU, attention in numpy); fills the KV cache,
+        returns the logits of the last token."""
+        H, NH, NKV, HD, eps = self.H, self.NH, self.NKV, self.HD, self.eps
+        T, rep = len(ids), self.NH // self.NKV
+        X = self.embed[ids].astype(np.float32)
+        ang = np.arange(T)[:, None] * (1.0 / self.theta ** (np.arange(0, HD, 2) / HD))[None, :]
+        cos = np.concatenate([np.cos(ang)] * 2, 1).astype(np.float32)[:, None, :]
+        sin = np.concatenate([np.sin(ang)] * 2, 1).astype(np.float32)[:, None, :]
+        rot = lambda x: np.concatenate([-x[..., HD // 2:], x[..., :HD // 2]], -1)
+        mask = np.triu(np.full((T, T), -1e30, np.float32), 1)
+        rmsb = lambda x, w: x / np.sqrt((x * x).mean(-1, keepdims=True) + eps) * w
+        for i, L in enumerate(self.layers):
+            P = L["p"]
+            qkv = P["qkv"](rmsb(X, L["ln1"]))
+            q = qkv[:, :H].reshape(T, NH, HD)
+            k = qkv[:, H:H + NKV * HD].reshape(T, NKV, HD)
+            v = qkv[:, H + NKV * HD:].reshape(T, NKV, HD)
+            q, k = q * cos + rot(q) * sin, k * cos + rot(k) * sin
+            self.kc[i, :T], self.vc[i, :T] = k, v
+            kh, vh = np.repeat(k, rep, 1).transpose(1, 0, 2), np.repeat(v, rep, 1).transpose(1, 0, 2)
+            sc = q.transpose(1, 0, 2) @ kh.transpose(0, 2, 1) / np.sqrt(HD) + mask      # (NH, T, T), causal
+            sc = np.exp(sc - sc.max(-1, keepdims=True)); sc /= sc.sum(-1, keepdims=True)
+            X = X + P["o"]((sc @ vh).transpose(1, 0, 2).reshape(T, H))
+            h2 = rmsb(X, L["ln2"])
+            g, u = P["gate"](h2), P["up"](h2)
+            X = X + P["down"]((g / (1 + np.exp(-np.clip(g, -60, 60)))) * u)
+        return self.lm(rms(X[-1], self.norm, eps))
+
     def stream(self, prompt, n):
         """Yield the answer piece by piece (UTF-8 safe). Timing ends up in self.stats."""
         text = (f"<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n")
@@ -188,8 +244,11 @@ class Qwen:
         if len(ids) + n >= self.kc.shape[1]:
             raise ValueError(f"prompt ({len(ids)} tokens) + answer exceeds the {self.kc.shape[1]}-token context")
         t0 = time.perf_counter(); out = []
-        for pos, t in enumerate(ids):                     # prefill, one token at a time
-            logits = self.step(t, pos)
+        if getattr(self, "pf", None):                     # whole prompt at once
+            logits = self.prefill(ids)
+        else:                                             # fallback: one token at a time
+            for pos, t in enumerate(ids):
+                logits = self.step(t, pos)
         t_pre = time.perf_counter() - t0
         t1, sent = time.perf_counter(), ""
         self.stats = {"prefill_tokens": len(ids), "prefill_s": t_pre, "decode_tokens": 0, "decode_s": 0.0}

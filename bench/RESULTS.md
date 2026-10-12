@@ -125,3 +125,20 @@ Prefill is one token at a time (same speed as decode); batching it is the obviou
 Build the kernels for any Qwen2.5 size with:
 `python scripts/build_matvec.py --shared $(python src/qwen_npu.py --model models/qwen15 --shapes)`
 (sizes whose M is not a multiple of 64 or K not a multiple of 128 need padding, not handled yet).
+
+## Batched prompt processing ("prefill") on the NPU (`src/prefill_npu.py`)
+bf16 x bf16 -> f32 matmuls (mlir-aie whole_array), 128 tokens per call, weights used exactly as the model stores them.
+Building block alone (`bench/matmul_bf16_npu.py`, 4 columns): 128x896x1152 in 0.34 ms (787 GFLOPS), relative error 2.5e-7.
+Constraints found: the DMA repeat count caps N per call (~40 tiles, so wide layers are split into column chunks), and
+a 4-column context cannot be created while the two 2-column decode contexts hold all columns (ENODEV), so prefill kernels
+use 2 columns, which the driver lets share partitions with the decode contexts.
+
+667-token prompt (Spanish text + question), tokens/second:
+
+| model | token-by-token (before) | batched on NPU | notes |
+|---|---:|---:|---|
+| Qwen2.5-0.5B | 14 tok/s (47.7 s) | **171 tok/s (3.9 s)** | logits cosine 0.9996 vs the old path, same top-1 |
+| Qwen2.5-1.5B | ~6.5 tok/s (~100 s) | **56 tok/s (11.9 s)** | first call is slower (warm-up); answer quotes the given text correctly |
+
+Build: `python scripts/build_prefill.py models/qwen models/qwen15`. Disable with `NPU_PREFILL=0`.
+Needs ~0.7 GB (0.5B) / ~2.6 GB (1.5B) of extra RAM for the bf16 weight copy.
