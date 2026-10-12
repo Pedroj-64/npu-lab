@@ -8,7 +8,7 @@ Security model: binds 127.0.0.1 on a random port; every API request needs `Autho
 URL fragment, which never reaches the server); the Host header must be loopback; an Origin header is only
 accepted if it is this server's own origin; no CORS headers; only whitelisted models; folders only under $HOME.
 
-API (JSON):  POST /login (one-time code -> token)   GET /status /rules /doctor   POST /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
+API (JSON):  POST /login (one-time code -> token)   GET /status /rules /doctor /settings   POST /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
 """
 import gc, hmac, json, os, secrets, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -294,12 +294,16 @@ class H(BaseHTTPRequestHandler):
             self._send(200, {"mode": S.mode, "model": S.model, "profile": S.profile,
                              "busy": S.npu_lock.locked(), "index": S.index_info(), "docs": S.docs_info(), "job": S.job,
                              "gpu_helper": importlib.util.find_spec("torch") is not None,
+                             "cloud": bool(__import__("settings").load()["cloud"]["active"]),
                              "models": sorted(MODELS)})
         elif self.path == "/rules":
             import search
             self._send(200, search.rules())
         elif self.path == "/doctor":
             self._send(200, {"checks": doctor()})
+        elif self.path == "/settings":
+            import settings
+            self._send(200, settings.masked(settings.load()))
         else:
             raise Bad(404, "not found")
 
@@ -315,6 +319,28 @@ class H(BaseHTTPRequestHandler):
             self._send(200, {"profile": S.profile})
         elif self.path == "/rules":
             self._send(200, set_rules(d))
+        elif self.path == "/settings":
+            import settings
+            try:
+                self._send(200, settings.masked(settings.update(d)))
+            except ValueError as e:
+                raise Bad(400, str(e))
+        elif self.path == "/settings/models":       # list the models a configured provider offers
+            import settings, cloud, web
+            p = settings.load()["cloud"]["providers"].get(str(d.get("provider", "")))
+            if not p:
+                raise Bad(404, "unknown provider")
+            try:
+                self._send(200, {"models": cloud.list_models(p)})
+            except web.WebError as e:
+                raise Bad(502, str(e))
+        elif self.path == "/settings/test_web":
+            import settings, web
+            try:
+                r = web.search(str(d.get("query", "npu"))[:200], settings.load()["web"], 3, 0)
+                self._send(200, {"results": [{"title": x["title"], "url": x["url"]} for x in r]})
+            except web.WebError as e:
+                raise Bad(502, str(e))
         elif self.path == "/chat":
             self._chat(d)
         elif self.path == "/search":
@@ -328,38 +354,76 @@ class H(BaseHTTPRequestHandler):
         else:
             raise Bad(404, "not found")
 
+    def _line(self, obj):
+        self.wfile.write((json.dumps(obj) + "\n").encode())
+        self.wfile.flush()
+
     def _chat(self, d):
-        prompt, n, use_docs = str(d.get("prompt", "")), int(d.get("tokens", 256)), bool(d.get("docs", False))
-        if S.mode != "llm":
-            raise Bad(409, "not in llm mode")
+        """ndjson stream: {phase}, {sources}, {warning}, {think}, {token}, {done, stats}, {error}.
+        backend "local": the NPU model (needs llm mode). backend "cloud": your configured provider (needs no NPU)."""
+        import settings
+        prompt, n = str(d.get("prompt", "")), int(d.get("tokens", 400))
+        use_docs, use_web, cloud = bool(d.get("docs")), bool(d.get("web")), d.get("backend") == "cloud"
+        history = [{"role": m.get("role"), "content": str(m.get("content", ""))[:6000]} for m in (d.get("history") or [])[-20:] if isinstance(m, dict)]
         if not prompt.strip() or len(prompt) > MAX_PROMPT or not 1 <= n <= MAX_TOKENS:
             raise Bad(400, f"prompt 1..{MAX_PROMPT} chars, tokens 1..{MAX_TOKENS}")
-        if not S.npu_lock.acquire(blocking=False):
+        cfg = settings.load()
+        provider = cfg["cloud"]["providers"].get(cfg["cloud"]["active"]) if cloud else None
+        if cloud and not provider:
+            raise Bad(409, "no cloud provider is configured (Settings)")
+        if not cloud and S.mode != "llm":
+            raise Bad(409, "not in llm mode")
+        if not cloud and not S.npu_lock.acquire(blocking=False):
             raise Bad(409, "busy")
         try:
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson")
             self.end_headers()
             try:
-                ctx = None
+                ctx = []
                 if use_docs:
+                    self._line({"phase": "docs"})
                     import docs, search
                     if S.docs_info() is None:
-                        raise RuntimeError("docs index not built: run `python src/docs.py --device gpu build` (or --device npu)")
-                    if S.embedder is None:
-                        S.embedder = search.make_model("cpu")
-                    ctx = docs.retrieve(S.embedder, prompt, 4, S.docs)
-                    self.wfile.write((json.dumps({"sources": [{"src": c["src"], "title": c["title"], "score": round(c["score"], 3)} for c in ctx]}) + "\n").encode())
-                    self.wfile.flush()
-                for piece in S.engine.stream(prompt, n, ctx):
-                    self.wfile.write((json.dumps({"token": piece}) + "\n").encode()); self.wfile.flush()
-                self.wfile.write((json.dumps({"done": True, "stats": S.engine.stats}) + "\n").encode())
+                        self._line({"warning": "docs index not built: run `python src/docs.py --device gpu build`"})
+                    else:
+                        if S.embedder is None:
+                            S.embedder = search.make_model("cpu")
+                        ctx += [{**c, "kind": "docs"} for c in docs.retrieve(S.embedder, prompt, 4, S.docs)]
+                if use_web:
+                    self._line({"phase": "web"})
+                    import web
+                    try:
+                        ctx += web.as_context(web.search(prompt[:200], cfg["web"], cfg["web"]["results"], cfg["web"]["read"]))
+                    except web.WebError as e:
+                        self._line({"warning": f"web search failed: {e}"})
+                if ctx:
+                    self._line({"sources": [{"src": c["src"], "title": c.get("title", c["src"]), "url": c.get("url", ""), "kind": c["kind"]} for c in ctx]})
+                if cloud:
+                    import cloud as cl
+                    self._line({"phase": "asking", "provider": cfg["cloud"]["active"]})
+                    send = prompt
+                    if ctx and d.get("cloud_context"):    # excerpts only leave the PC if the user ticked "include excerpts"
+                        send = "Reference excerpts:\n\n" + "\n\n".join(f"[{c['src']}]\n{c['text']}" for c in ctx) + f"\n\nQuestion: {prompt}"
+                    t0, count = time.time(), 0
+                    for kind, piece in cl.stream(provider, history + [{"role": "user", "content": send}], n):
+                        count += 1
+                        self._line({kind: piece})
+                    self._line({"done": True, "stats": {"backend": "cloud", "seconds": round(time.time() - t0, 1)}})
+                else:
+                    for piece in S.engine.stream(prompt, n, ctx or None, history, lambda name, **kw: self._line({"phase": name, **kw})):
+                        self._line({"token": piece})
+                    self._line({"done": True, "stats": {"backend": "local", **S.engine.stats}})
             except (BrokenPipeError, ConnectionResetError):
                 pass                      # client left: stop generating
             except Exception as e:
-                self.wfile.write((json.dumps({"error": f"{type(e).__name__}: {e}"}) + "\n").encode())
+                try:
+                    self._line({"error": f"{type(e).__name__}: {e}"})
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
         finally:
-            S.npu_lock.release()
+            if not cloud:
+                S.npu_lock.release()
 
     def _search(self, d):
         import search
