@@ -143,10 +143,12 @@ class Bad(Exception):
 def set_mode(mode, model=None, device="npu"):
     if mode not in ("none", "llm", "search"):
         raise Bad(400, "mode must be none|llm|search")
-    if S.job.get("state") == "running":
-        raise Bad(409, "an index job is running")
+    j = S.job
+    if j.get("state") == "running" and j.get("device") == "npu":   # a GPU/CPU index job does not hold the NPU
+        done = f" ({j.get('files_done', 0)}/{j.get('files_total') or '?'} files)" if j.get("files_total") else ""
+        raise Bad(409, f"Indexing is using the NPU{done}. Wait for it to finish, or press Stop in the Search tab.")
     if not S.npu_lock.acquire(blocking=False):
-        raise Bad(409, "busy")
+        raise Bad(409, "The NPU is busy answering a request. Try again in a moment.")
     try:
         S.unload()
         if mode == "llm":

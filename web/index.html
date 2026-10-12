@@ -69,7 +69,8 @@
   <div class="card"><h2>Model</h2><div class="row">
     <select id="llmsel"></select><button class="b pri" id="loadllm">Load</button><button class="b" id="unload">Unload (free the NPU)</button>
     <span class="dim" id="llmstate"></span></div>
-    <div class="dim" style="margin-top:6px;font-size:12.5px">While a model is loaded it holds the NPU: other programs cannot use it until you unload.</div></div>
+    <div class="dim" style="margin-top:6px;font-size:12.5px">While a model is loaded it holds the NPU: other programs cannot use it until you unload.</div>
+    <div class="warn" id="jobwarn" style="display:none;margin-top:8px"></div></div>
   <div class="card"><div id="log"></div>
     <div class="row" style="margin-top:12px"><textarea id="prompt" rows="2" placeholder="Ask something… (Enter to send, Shift+Enter for a new line)"></textarea></div>
     <div class="row" style="margin-top:8px">
@@ -249,6 +250,11 @@ async function refresh() {
   else if (j.state === "done" || j.state === "aborted") { $("idxbar").style.width = "100%"; $("idxprog").textContent = `${j.state}: ${j.chunks_new} new chunks in ${Math.round(j.seconds)}s`; }
   else if (j.state === "error") $("idxprog").textContent = "error: " + j.error;
   $("idxgo").disabled = j.state === "running";
+  const jw = $("jobwarn"), usesNpu = j.state === "running" && j.device === "npu";
+  jw.style.display = j.state === "running" ? "" : "none";
+  if (j.state === "running") jw.textContent = `Indexing is running on the ${(j.device || "").toUpperCase()} (${j.files_done || 0}/${j.files_total || "?"} files). ` +
+    (usesNpu ? "The NPU is busy until it finishes, so a model cannot be loaded now. You can stop it in the Search tab." : "The NPU is free; you can load a model.");
+  $("loadllm").disabled = usesNpu;
   const cloudOpt = $("backend").options[1]; cloudOpt.disabled = !ST.cloud; cloudOpt.textContent = ST.cloud ? "Cloud · " + (SET ? SET.cloud.active : "provider") : "Cloud (set up in Settings)";
   if (!ST.cloud && $("backend").value === "cloud") $("backend").value = "local";
   syncChatControls();
