@@ -5,35 +5,51 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>npu-lab</title>
 <style>
-  :root { --bg:#0f1115; --panel:#171a21; --line:#272c37; --text:#e6e8ee; --dim:#8b93a5; --ok:#4cc38a; --bad:#ef6a6a; --acc:#6aa7ff; }
+  :root { --bg:#0f1115; --panel:#171a21; --line:#272c37; --text:#e6e8ee; --dim:#8b93a5; --ok:#4cc38a; --bad:#ef6a6a; --acc:#6aa7ff; --code:#0b0d12; }
   * { box-sizing: border-box; }
-  body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  body { margin:0; font:14px/1.55 system-ui, sans-serif; background:var(--bg); color:var(--text); }
   header { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid var(--line); background:var(--panel); }
   header h1 { font-size:16px; margin:0; letter-spacing:.3px; }
   #pill { margin-left:auto; padding:3px 10px; border-radius:99px; border:1px solid var(--line); color:var(--dim); font-size:12px; }
   nav { display:flex; gap:4px; padding:0 20px; border-bottom:1px solid var(--line); }
   nav button { background:none; border:0; color:var(--dim); padding:10px 14px; cursor:pointer; border-bottom:2px solid transparent; font:inherit; }
   nav button.on { color:var(--text); border-color:var(--acc); }
-  main { max-width:900px; margin:0 auto; padding:20px; }
+  main { max-width:920px; margin:0 auto; padding:20px; }
   section { display:none; } section.on { display:block; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
-  h2 { font-size:14px; margin:0 0 10px; color:var(--dim); text-transform:uppercase; letter-spacing:.6px; font-weight:600; }
-  button.b, select, input[type=text], textarea { background:#1f242e; color:var(--text); border:1px solid var(--line); border-radius:7px; padding:7px 12px; font:inherit; }
+  h2 { font-size:13px; margin:0 0 10px; color:var(--dim); text-transform:uppercase; letter-spacing:.6px; font-weight:600; }
+  button.b, select, input[type=text], input[type=password], input[type=number], textarea { background:#1f242e; color:var(--text); border:1px solid var(--line); border-radius:7px; padding:7px 12px; font:inherit; }
   button.b { cursor:pointer; } button.b:hover { border-color:var(--acc); } button.b:disabled { opacity:.45; cursor:default; }
   button.pri { background:var(--acc); color:#08111f; border-color:var(--acc); font-weight:600; }
-  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .chk { display:grid; grid-template-columns:22px 1fr; gap:2px 8px; padding:7px 0; border-bottom:1px solid var(--line); }
-  .chk:last-child { border:0; } .ok { color:var(--ok); } .no { color:var(--bad); }
-  .dim { color:var(--dim); } .fix { grid-column:2; color:var(--dim); font-size:12.5px; }
-  #log { height:380px; overflow:auto; display:flex; flex-direction:column; gap:10px; }
-  .msg { padding:9px 12px; border-radius:9px; white-space:pre-wrap; max-width:92%; }
-  .me { background:#22304a; align-self:flex-end; } .bot { background:#1f242e; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; } .grow { flex:1; min-width:140px; }
+  .chk { display:grid; grid-template-columns:22px 1fr; gap:2px 8px; padding:7px 0; border-bottom:1px solid var(--line); } .chk:last-child { border:0; }
+  .ok { color:var(--ok); } .no { color:var(--bad); } .dim { color:var(--dim); } .fix { grid-column:2; color:var(--dim); font-size:12.5px; }
+  #log { height:440px; overflow:auto; display:flex; flex-direction:column; gap:12px; padding-right:4px; }
+  .msg { padding:10px 14px; border-radius:10px; max-width:94%; overflow-wrap:anywhere; }
+  .me { background:#22304a; align-self:flex-end; white-space:pre-wrap; } .bot { background:#1b1f28; border:1px solid var(--line); }
   textarea { width:100%; resize:vertical; }
+  /* markdown */
+  .md > :first-child { margin-top:0 } .md > :last-child { margin-bottom:0 }
+  .md p { margin:.5em 0 } .md h1,.md h2,.md h3,.md h4 { margin:.9em 0 .4em; font-size:1.05em; color:var(--text); text-transform:none; letter-spacing:0 }
+  .md ul,.md ol { margin:.4em 0; padding-left:1.4em } .md blockquote { margin:.5em 0; padding:.1em .9em; border-left:3px solid var(--line); color:var(--dim) }
+  .md code.i { background:#272c37; padding:1px 5px; border-radius:4px; font:12.5px ui-monospace, monospace }
+  .md a { color:var(--acc) } .md hr { border:0; border-top:1px solid var(--line) }
+  .code { margin:.6em 0; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--code) }
+  .code .hd { display:flex; justify-content:space-between; align-items:center; padding:4px 10px; background:#151922; color:var(--dim); font-size:12px }
+  .code .hd button { background:none; border:0; color:var(--dim); cursor:pointer; font:inherit } .code .hd button:hover { color:var(--text) }
+  .code pre { margin:0; padding:10px 12px; overflow:auto; font:12.5px/1.5 ui-monospace, "SF Mono", Menlo, monospace }
+  .t-k { color:#c792ea } .t-s { color:#a5d6a7 } .t-c { color:#6b7385; font-style:italic } .t-n { color:#f2b27c }
+  details.think { margin:0 0 8px; border:1px dashed var(--line); border-radius:8px; padding:4px 10px; color:var(--dim); font-size:13px }
+  details.think summary { cursor:pointer } details.think .tb { white-space:pre-wrap; margin-top:6px }
+  .phase { color:var(--dim); font-size:13px; display:flex; align-items:center; gap:2px; margin-bottom:6px } .phase:empty { display:none }
+  .dots::after { content:""; display:inline-block; width:1.2em; text-align:left; animation:d 1.2s steps(4,end) infinite }
+  @keyframes d { 0%{content:""} 25%{content:"."} 50%{content:".."} 75%{content:"..."} }
+  .src { color:var(--dim); font-size:12px; margin-bottom:6px } .src:empty { display:none } .src a { color:var(--acc); text-decoration:none }
   .res { padding:9px 0; border-bottom:1px solid var(--line); } .res:last-child { border:0; }
-  .path { color:var(--acc); word-break:break-all; } .score { color:var(--dim); font-size:12px; }
-  .snip { color:var(--dim); font-size:12.5px; word-break:break-word; }
+  .path { color:var(--acc); word-break:break-all; } .score { color:var(--dim); font-size:12px; } .snip { color:var(--dim); font-size:12.5px; word-break:break-word; }
   .bar { height:8px; background:#1f242e; border-radius:5px; overflow:hidden; } .bar i { display:block; height:100%; width:0; background:var(--acc); }
-  #toast { position:fixed; bottom:16px; right:16px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 14px; display:none; max-width:420px; }
+  .warn { color:#e8c06a; font-size:12.5px } label.f { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--dim) }
+  #toast { position:fixed; bottom:16px; right:16px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 14px; display:none; max-width:420px; z-index:9; }
 </style>
 </head>
 <body>
@@ -48,22 +64,32 @@
     <label><input type="radio" name="prof" value="assisted"> <b>Assisted</b> <span class="dim">— the first big index may use the GPU (VRAM-capped) or CPU; day-to-day stays on the NPU</span></label>
     <div class="dim" id="profnote" style="margin-top:8px"></div></div>
 </section>
+
 <section id="chat">
   <div class="card"><h2>Model</h2><div class="row">
     <select id="llmsel"></select><button class="b pri" id="loadllm">Load</button><button class="b" id="unload">Unload (free the NPU)</button>
-    <span class="dim" id="llmstate"></span></div></div>
+    <span class="dim" id="llmstate"></span></div>
+    <div class="dim" style="margin-top:6px;font-size:12.5px">While a model is loaded it holds the NPU: other programs cannot use it until you unload.</div></div>
   <div class="card"><div id="log"></div>
-    <div class="row" style="margin-top:12px"><textarea id="prompt" rows="2" placeholder="Ask something… (Enter to send, Shift+Enter for a new line)"></textarea>
-    <button class="b pri" id="send">Send</button><button class="b" id="stop" disabled>Stop</button></div>
-    <div class="row" style="margin-top:6px"><label><input type="checkbox" id="usedocs" checked> use local documentation (man, tldr, Arch wiki)</label>
-      <span class="dim" id="docsinfo"></span></div>
+    <div class="row" style="margin-top:12px"><textarea id="prompt" rows="2" placeholder="Ask something… (Enter to send, Shift+Enter for a new line)"></textarea></div>
+    <div class="row" style="margin-top:8px">
+      <button class="b pri" id="send">Send</button><button class="b" id="stop" disabled>Stop</button><button class="b" id="newchat">New chat</button>
+      <select id="backend" title="Where the answer is generated"><option value="local">Local · NPU</option><option value="cloud" disabled>Cloud (set up in Settings)</option></select>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label><input type="checkbox" id="usedocs" checked> local docs</label><span class="dim" id="docsinfo"></span>
+      <label><input type="checkbox" id="useweb"> web search</label>
+      <label id="ctxwrap" style="display:none"><input type="checkbox" id="cloudctx"> also send the excerpts to the cloud</label>
+    </div>
+    <div class="warn" id="cloudwarn" style="display:none;margin-top:6px">Cloud: your question and this conversation leave your PC and go to the provider you configured. Your files are never sent.</div>
     <div class="dim" id="stats" style="margin-top:6px"></div></div>
 </section>
+
 <section id="search">
   <div class="card"><h2>Search engine</h2><div class="row">
     <select id="dev"><option value="npu">NPU</option><option value="gpu">GPU</option><option value="cpu">CPU</option></select>
     <button class="b pri" id="loadsearch">Load search</button><span class="dim" id="sstate"></span></div></div>
-  <div class="card"><div class="row"><input type="text" id="q" style="flex:1" placeholder="Search your files by meaning…"><button class="b pri" id="go">Search</button></div>
+  <div class="card"><div class="row"><input type="text" id="q" class="grow" placeholder="Search your files by meaning…"><button class="b pri" id="go">Search</button></div>
     <div id="results" style="margin-top:12px"></div></div>
   <div class="card"><h2>Index</h2><div class="dim" id="idxinfo"></div>
     <div class="row" style="margin:10px 0"><select id="idev"><option value="npu">NPU</option><option value="gpu">GPU (assisted)</option><option value="cpu">CPU (assisted)</option></select>
@@ -72,6 +98,38 @@
   <div class="card"><h2>Folders that may be read</h2>
     <div class="dim" style="margin-bottom:8px">One folder per line, inside your home. Secrets, keys, <code>.env</code>, <code>.git</code>, build folders and more are always skipped.</div>
     <textarea id="roots" rows="4"></textarea><div class="row" style="margin-top:8px"><button class="b" id="saveroots">Save folders</button></div></div>
+</section>
+
+<section id="settings">
+  <div class="card"><h2>Web search</h2>
+    <div class="row">
+      <label class="f">Provider<select id="wprov"><option value="duckduckgo">DuckDuckGo (no key)</option><option value="wikipedia">Wikipedia (no key)</option>
+        <option value="searxng">SearXNG (your instance)</option><option value="brave">Brave Search (API key)</option></select></label>
+      <label class="f grow">SearXNG URL<input type="text" id="wsx" placeholder="https://searx.example.org"></label>
+      <label class="f grow">Brave API key<input type="password" id="wbrave" autocomplete="off" placeholder=""></label>
+      <label class="f">Results<input type="number" id="wn" min="1" max="8" style="width:70px"></label>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="b pri" id="wsave">Save</button><button class="b" id="wtest">Test</button><span class="dim" id="wout"></span></div>
+    <div class="dim" style="margin-top:8px;font-size:12.5px">Only your question text is sent to the search provider. The server refuses to fetch anything that points to your local network.</div></div>
+  <div class="card"><h2>Cloud assist (your own API key)</h2>
+    <div class="dim" style="margin-bottom:10px;font-size:12.5px">Optional, per message. Works with any OpenAI-compatible endpoint (NVIDIA NIM / Nemotron, OpenRouter, Ollama…) or Gemini.
+      Keys are stored only in <code>~/.config/npu-lab/providers.json</code> (readable by your user only) and are never shown again.</div>
+    <div class="row">
+      <label class="f">Saved providers<select id="cprov"></select></label>
+      <button class="b" id="cnew">+ New</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="f">Name<input type="text" id="cname" placeholder="nvidia" style="width:120px"></label>
+      <label class="f">Kind<select id="ckind"><option value="openai">OpenAI-compatible</option><option value="gemini">Gemini</option></select></label>
+      <label class="f grow">Base URL (optional)<input type="text" id="curl" placeholder="https://integrate.api.nvidia.com/v1"></label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="f grow">Model<input type="text" id="cmodel" list="cmodels" placeholder="use “List models”"><datalist id="cmodels"></datalist></label>
+      <label class="f grow">API key<input type="password" id="ckey" autocomplete="off" placeholder=""></label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="b pri" id="csave">Save</button><button class="b" id="clist">List models</button>
+      <button class="b" id="cuse">Use as active</button><button class="b" id="cdel">Remove</button><span class="dim" id="cout"></span></div></div>
 </section>
 </main>
 <div id="toast"></div>
@@ -86,9 +144,8 @@ async function login() {                                                        
   const r = await fetch("/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
   if (r.ok) { TOKEN = (await r.json()).token; sessionStorage.setItem("npu-lab-token", TOKEN); }
 }
-let ST = null, abort = null;
-
-function toast(msg, ms = 4000) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = "none", ms); }
+let ST = null, SET = null, abort = null, HISTORY = [];
+function toast(msg, ms = 4500) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = "none", ms); }
 async function api(path, body) {
   const r = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" },
                                 body: body === undefined ? undefined : JSON.stringify(body) });
@@ -98,12 +155,82 @@ async function api(path, body) {
 }
 function mk(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 
-// ---- tabs
-const TABS = [["setup", "Setup"], ["chat", "Chat"], ["search", "Search"]];
-TABS.forEach(([id, name]) => { const b = mk("button", "", name); b.onclick = () => show(id); b.dataset.t = id; $("nav").append(b); });
-function show(id) { TABS.forEach(([t]) => { $(t).classList.toggle("on", t === id); }); [...$("nav").children].forEach(b => b.classList.toggle("on", b.dataset.t === id)); }
+// ---------------------------------------------------------------- markdown (DOM only, never innerHTML)
+const KW = new Set(("def class return if elif else for while import from as with try except finally raise lambda yield pass break continue in is not and or None True False " +
+  "function const let var new this async await export default typeof null undefined true false switch case do " +
+  "fn pub struct impl enum use mut match loop self Self trait where " +
+  "int long float double char void static public private protected final package interface extends implements throws " +
+  "sudo echo cd ls cat grep sed awk pacman paru yay systemctl then fi done").split(" "));
+function highlight(code) {                                   // tiny generic tokenizer: comments, strings, numbers, keywords
+  const f = document.createDocumentFragment();
+  const re = /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/)|("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|(\b\d[\d_.]*\b)|(\b[A-Za-z_][A-Za-z0-9_]*\b)/g;
+  let last = 0, m;
+  const add = (t, c) => { if (!t) return; if (c) f.append(mk("span", c, t)); else f.append(document.createTextNode(t)); };
+  while ((m = re.exec(code))) {
+    add(code.slice(last, m.index));
+    if (m[1]) add(m[0], "t-c"); else if (m[2]) add(m[0], "t-s"); else if (m[3]) add(m[0], "t-n"); else add(m[0], KW.has(m[0]) ? "t-k" : "");
+    last = m.index + m[0].length;
+  }
+  add(code.slice(last)); return f;
+}
+function codeBlock(lang, code) {
+  const box = mk("div", "code"), hd = mk("div", "hd"), btn = mk("button", "", "Copy");
+  hd.append(mk("span", "", lang || "code"), btn);
+  btn.onclick = async () => { try { await navigator.clipboard.writeText(code); btn.textContent = "Copied ✓"; setTimeout(() => btn.textContent = "Copy", 1500); } catch (e) { toast("Could not copy"); } };
+  const pre = mk("pre"), c = mk("code"); c.append(highlight(code)); pre.append(c); box.append(hd, pre); return box;
+}
+function inline(parent, text) {
+  const re = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]+\]\([^)\s]+\))/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    parent.append(document.createTextNode(text.slice(last, m.index)));
+    const t = m[0];
+    if (m[1]) parent.append(mk("code", "i", t.slice(1, -1)));
+    else if (m[2]) parent.append(mk("strong", "", t.slice(2, -2)));
+    else if (m[3]) parent.append(mk("em", "", t.slice(1, -1)));
+    else { const mm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(t); let u; try { u = new URL(mm[2]); } catch (e) {}
+      if (u && (u.protocol === "https:" || u.protocol === "http:")) { const a = mk("a", "", mm[1]); a.href = u.href; a.target = "_blank"; a.rel = "noopener noreferrer"; parent.append(a); }
+      else parent.append(document.createTextNode(t)); }
+    last = m.index + t.length;
+  }
+  parent.append(document.createTextNode(text.slice(last)));
+}
+function renderMd(el, src) {                                 // handles unterminated fences too (streaming)
+  el.textContent = ""; el.classList.add("md");
+  const lines = src.split("\n"); let i = 0, para = [];
+  const flush = () => { if (para.length) { const p = mk("p"); inline(p, para.join("\n")); el.append(p); para = []; } };
+  while (i < lines.length) {
+    const L = lines[i], fence = /^```\s*([\w+#.-]*)\s*$/.exec(L);
+    if (fence) { flush(); const buf = []; i++; while (i < lines.length && !/^```\s*$/.test(lines[i])) buf.push(lines[i++]); i++; el.append(codeBlock(fence[1], buf.join("\n"))); continue; }
+    let m;
+    if ((m = /^(#{1,4})\s+(.*)$/.exec(L))) { flush(); const h = mk("h" + m[1].length); inline(h, m[2]); el.append(h); i++; continue; }
+    if (/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(L)) { flush(); el.append(mk("hr")); i++; continue; }
+    if (/^\s*[-*+]\s+/.test(L) || /^\s*\d+[.)]\s+/.test(L)) { flush(); const ord = /^\s*\d+[.)]/.test(L), ul = mk(ord ? "ol" : "ul");
+      while (i < lines.length && (ord ? /^\s*\d+[.)]\s+/ : /^\s*[-*+]\s+/).test(lines[i])) { const li = mk("li"); inline(li, lines[i].replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "")); ul.append(li); i++; }
+      el.append(ul); continue; }
+    if (/^>\s?/.test(L)) { flush(); const bq = mk("blockquote"), buf = []; while (i < lines.length && /^>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^>\s?/, "")); inline(bq, buf.join("\n")); el.append(bq); continue; }
+    if (!L.trim()) { flush(); i++; continue; }
+    para.push(L); i++;
+  }
+  flush();
+}
+// <think>…</think> (reasoning models) -> collapsible block; the rest is markdown
+function renderMsg(msg) {                                    // msg: {body, text, think, done}
+  let text = msg.text, think = msg.think || "";
+  const re = /<think>([\s\S]*?)(<\/think>|$)/g; let m;
+  while ((m = re.exec(text))) { think += (think ? "\n" : "") + m[1]; }
+  text = text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").replace(/^\s+/, "");
+  const prevOpen = msg.thinkEl ? msg.thinkEl.open : null;
+  msg.body.textContent = "";
+  if (think) { const d = mk("details", "think"); d.open = prevOpen !== null ? prevOpen : (!msg.done && !text);
+    d.append(mk("summary", "", msg.done || text ? "Thinking (click to expand)" : "Thinking…"), mk("div", "tb", think)); msg.thinkEl = d; msg.body.append(d); }
+  const md = mk("div"); renderMd(md, text); msg.body.append(md);
+}
 
-// ---- status
+// ---------------------------------------------------------------- tabs / status
+const TABS = [["setup", "Setup"], ["chat", "Chat"], ["search", "Search"], ["settings", "Settings"]];
+TABS.forEach(([id, name]) => { const b = mk("button", "", name); b.onclick = () => show(id); b.dataset.t = id; $("nav").append(b); });
+function show(id) { TABS.forEach(([t]) => $(t).classList.toggle("on", t === id)); [...$("nav").children].forEach(b => b.classList.toggle("on", b.dataset.t === id)); }
 async function refresh() {
   try { ST = await api("/status"); } catch (e) { $("pill").textContent = "no connection"; return; }
   $("pill").textContent = `${ST.mode === "none" ? "idle" : ST.mode + (ST.model ? " · " + ST.model : "")} · ${ST.profile === "npu_only" ? "NPU only" : "assisted"}${ST.busy ? " · busy" : ""}`;
@@ -113,7 +240,7 @@ async function refresh() {
   $("profnote").textContent = ST.gpu_helper ? "" : "GPU helper (torch) is not installed; CPU assistance still works.";
   $("llmstate").textContent = ST.mode === "llm" ? "loaded: " + ST.model : "";
   $("sstate").textContent = ST.mode === "search" ? "loaded on " + ST.model : "";
-  $("docsinfo").textContent = ST.docs ? `(${ST.docs.chunks} chunks indexed)` : "(docs index not built — see Setup)";
+  $("docsinfo").textContent = ST.docs ? `(${ST.docs.chunks} chunks)` : "(docs index not built — see Setup)";
   if (!ST.docs) $("usedocs").checked = false;
   $("idxinfo").textContent = `${ST.index.files} files, ${ST.index.chunks} chunks indexed`;
   const j = ST.job || {};
@@ -122,7 +249,12 @@ async function refresh() {
   else if (j.state === "done" || j.state === "aborted") { $("idxbar").style.width = "100%"; $("idxprog").textContent = `${j.state}: ${j.chunks_new} new chunks in ${Math.round(j.seconds)}s`; }
   else if (j.state === "error") $("idxprog").textContent = "error: " + j.error;
   $("idxgo").disabled = j.state === "running";
+  const cloudOpt = $("backend").options[1]; cloudOpt.disabled = !ST.cloud; cloudOpt.textContent = ST.cloud ? "Cloud · " + (SET ? SET.cloud.active : "provider") : "Cloud (set up in Settings)";
+  if (!ST.cloud && $("backend").value === "cloud") $("backend").value = "local";
+  syncChatControls();
 }
+function syncChatControls() { const c = $("backend").value === "cloud"; $("ctxwrap").style.display = c ? "" : "none"; $("cloudwarn").style.display = c ? "" : "none"; }
+$("backend").onchange = syncChatControls;
 async function doctor() {
   const box = $("doctor"); box.textContent = "checking…";
   try { const { checks } = await api("/doctor"); box.textContent = "";
@@ -133,33 +265,47 @@ async function doctor() {
 document.querySelectorAll("input[name=prof]").forEach(r => r.onchange = async () => { try { await api("/profile", { profile: r.value }); } catch (e) { toast(e.message); } refresh(); });
 $("recheck").onclick = doctor;
 
-// ---- chat
-function addMsg(cls, text) { const m = mk("div", "msg " + cls, text); $("log").append(m); $("log").scrollTop = 1e9; return m; }
+// ---------------------------------------------------------------- chat
 $("loadllm").onclick = async () => { $("loadllm").disabled = true; $("llmstate").textContent = "loading… (10–20 s)";
   try { await api("/mode", { mode: "llm", model: $("llmsel").value }); toast("Model loaded"); } catch (e) { toast(e.message); } $("loadllm").disabled = false; refresh(); };
 $("unload").onclick = async () => { try { await api("/mode", { mode: "none" }); toast("NPU is free"); } catch (e) { toast(e.message); } refresh(); };
+$("newchat").onclick = () => { HISTORY = []; $("log").textContent = ""; $("stats").textContent = ""; };
+const PHASES = { docs: "Searching local documentation", web: "Searching the web", asking: "Asking the cloud", writing: "Writing" };
 async function send() {
   const prompt = $("prompt").value.trim(); if (!prompt || abort) return;
-  if (!ST || ST.mode !== "llm") { toast("Load a model first"); return; }
-  $("prompt").value = ""; addMsg("me", prompt); const out = addMsg("bot", ""); $("send").disabled = true; $("stop").disabled = false; abort = new AbortController();
+  const cloud = $("backend").value === "cloud";
+  if (!cloud && (!ST || ST.mode !== "llm")) { toast("Load a model first (or choose Cloud)"); return; }
+  $("prompt").value = ""; const me = mk("div", "msg me", prompt); $("log").append(me);
+  const box = mk("div", "msg bot"), srcs = mk("div", "src"), phase = mk("div", "phase"), body = mk("div");
+  box.append(phase, srcs, body); $("log").append(box); $("log").scrollTop = 1e9;
+  const msg = { text: "", think: "", body, done: false };
+  const setPhase = t => { phase.textContent = ""; if (t) { phase.append(mk("span", "", t), mk("span", "dots")); } };
+  setPhase("Thinking"); $("send").disabled = true; $("stop").disabled = false; abort = new AbortController();
+  let raf = 0; const draw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderMsg(msg); $("log").scrollTop = 1e9; }); };
   try {
-    const r = await fetch("/chat", { method: "POST", signal: abort.signal, headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" }, body: JSON.stringify({ prompt, tokens: 400, docs: $("usedocs").checked }) });
+    const r = await fetch("/chat", { method: "POST", signal: abort.signal, headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, tokens: 600, history: HISTORY.slice(-12), backend: cloud ? "cloud" : "local", docs: $("usedocs").checked, web: $("useweb").checked, cloud_context: $("cloudctx").checked }) });
     if (!r.ok) throw new Error((await r.json()).error || r.statusText);
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) { const { done, value } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });
       let i; while ((i = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line) continue;
         const m = JSON.parse(line);
-        if (m.sources) { const sd = mk("div", "dim", "sources: " + m.sources.map(x => x.src).join(", ")); sd.style.fontSize = "12px"; out.before(sd); }
-        if (m.token) { out.textContent += m.token; $("log").scrollTop = 1e9; }
+        if (m.phase) setPhase(m.phase === "reading" ? `Reading ${m.tokens} tokens` : (PHASES[m.phase] || m.phase) + (m.provider ? " (" + m.provider + ")" : ""));
+        if (m.warning) { box.insertBefore(mk("div", "warn", m.warning), body); }
+        if (m.sources) { srcs.textContent = "sources: "; m.sources.forEach((s, k) => { if (k) srcs.append(", "); if (s.url && /^https?:/.test(s.url)) { const a = mk("a", "", s.src); a.href = s.url; a.target = "_blank"; a.rel = "noopener noreferrer"; srcs.append(a); } else srcs.append(s.src); }); }
+        if (m.think) { msg.think += m.think; setPhase("Thinking"); draw(); }
+        if (m.token) { if (!msg.text) setPhase(""); msg.text += m.token; draw(); }
         if (m.error) toast(m.error);
-        if (m.done) { const s = m.stats; $("stats").textContent = `${(s.decode_tokens / Math.max(s.decode_s, 1e-9)).toFixed(1)} tok/s · prompt ${s.prefill_tokens} tokens in ${s.prefill_s.toFixed(1)} s`; } } }
+        if (m.done) { const s = m.stats || {}; $("stats").textContent = s.backend === "cloud" ? `cloud · ${s.seconds}s` : `${(s.decode_tokens / Math.max(s.decode_s, 1e-9)).toFixed(1)} tok/s · prompt ${s.prefill_tokens} tokens read in ${s.prefill_s.toFixed(1)} s`; } } }
   } catch (e) { if (e.name !== "AbortError") toast(e.message); }
+  msg.done = true; setPhase(""); renderMsg(msg);
+  if (msg.text) HISTORY.push({ role: "user", content: prompt }, { role: "assistant", content: msg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim() });
   abort = null; $("send").disabled = false; $("stop").disabled = true; refresh();
 }
 $("send").onclick = send; $("stop").onclick = () => abort && abort.abort();
 $("prompt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
 
-// ---- search
+// ---------------------------------------------------------------- search
 $("loadsearch").onclick = async () => { $("loadsearch").disabled = true; $("sstate").textContent = "loading…";
   try { await api("/mode", { mode: "search", device: $("dev").value }); toast("Search ready"); } catch (e) { toast(e.message); } $("loadsearch").disabled = false; refresh(); };
 async function doSearch() {
@@ -174,13 +320,40 @@ $("idxgo").onclick = async () => { try { await api("/index", { device: $("idev")
 $("idxstop").onclick = async () => { try { await api("/index/stop", {}); } catch (e) { toast(e.message); } };
 $("saveroots").onclick = async () => { try { const r = await api("/rules", { roots: $("roots").value.split("\n").map(s => s.trim()).filter(Boolean) }); $("roots").value = r.roots.join("\n"); toast("Folders saved"); } catch (e) { toast(e.message); } };
 
+// ---------------------------------------------------------------- settings
+function fillCloud(name) {
+  const p = (SET.cloud.providers || {})[name] || {};
+  $("cname").value = name || ""; $("ckind").value = p.kind || "openai"; $("curl").value = p.base_url || ""; $("cmodel").value = p.model || "";
+  $("ckey").value = ""; $("ckey").placeholder = p.has_key ? "saved — leave empty to keep" : "paste your key";
+}
+function renderSettings() {
+  const w = SET.web; $("wprov").value = w.provider; $("wsx").value = w.searxng_url || ""; $("wn").value = w.results; $("wbrave").placeholder = w.has_brave_key ? "saved — leave empty to keep" : "";
+  const sel = $("cprov"); sel.textContent = ""; const names = Object.keys(SET.cloud.providers);
+  names.forEach(n => sel.append(new Option(n + (n === SET.cloud.active ? "  (active)" : ""), n)));
+  if (names.length) { sel.value = names.includes(sel.value) ? sel.value : (SET.cloud.active || names[0]); fillCloud(sel.value); } else fillCloud("");
+}
+async function loadSettings() { try { SET = await api("/settings"); renderSettings(); } catch (e) { toast(e.message); } }
+$("cprov").onchange = () => fillCloud($("cprov").value);
+$("cnew").onclick = () => { $("cprov").value = ""; fillCloud(""); $("cname").focus(); };
+$("wsave").onclick = async () => { try { SET = await api("/settings", { web: { provider: $("wprov").value, searxng_url: $("wsx").value, brave_key: $("wbrave").value, results: +$("wn").value || 4 } }); $("wbrave").value = ""; renderSettings(); toast("Saved"); } catch (e) { toast(e.message); } };
+$("wtest").onclick = async () => { $("wout").textContent = "testing…"; try { const r = await api("/settings/test_web", { query: "what is an NPU" }); $("wout").textContent = r.results.length + " results: " + r.results.map(x => x.title).join(" · ").slice(0, 160); } catch (e) { $("wout").textContent = e.message; } };
+$("csave").onclick = async () => {
+  const name = $("cname").value.trim(); if (!name) { toast("Give the provider a name"); return; }
+  try { SET = await api("/settings", { cloud: { providers: { [name]: { kind: $("ckind").value, base_url: $("curl").value, model: $("cmodel").value, key: $("ckey").value } } } });
+    $("ckey").value = ""; renderSettings(); $("cprov").value = name; fillCloud(name); toast("Saved"); await refresh(); } catch (e) { toast(e.message); } };
+$("cuse").onclick = async () => { try { SET = await api("/settings", { cloud: { active: $("cprov").value } }); renderSettings(); await refresh(); toast("Active provider set"); } catch (e) { toast(e.message); } };
+$("cdel").onclick = async () => { const n = $("cprov").value; if (!n || !confirm("Remove provider " + n + " and its key?")) return;
+  try { SET = await api("/settings", { cloud: { providers: { [n]: { remove: true } }, active: SET.cloud.active === n ? "" : SET.cloud.active } }); renderSettings(); await refresh(); } catch (e) { toast(e.message); } };
+$("clist").onclick = async () => { const n = $("cprov").value; if (!n) { toast("Save the provider first"); return; } $("cout").textContent = "asking the provider…";
+  try { const { models } = await api("/settings/models", { provider: n }); const dl = $("cmodels"); dl.textContent = ""; models.forEach(m => dl.append(new Option(m))); $("cout").textContent = models.length + " models (click the Model field to pick)"; } catch (e) { $("cout").textContent = e.message; } };
+
 (async function init() {
   await login();
   if (!TOKEN) { $("pill").textContent = "not signed in"; toast("Open the address printed by the launcher (its login link works once)."); return; }
   show("setup");
   try { const s = await api("/status"); for (const m of s.models) $("llmsel").append(new Option(m === "qwen" ? "Qwen2.5-0.5B (fast)" : m === "qwen15" ? "Qwen2.5-1.5B (better)" : m, m));
     $("roots").value = (await api("/rules")).roots.join("\n"); } catch (e) { toast(e.message); }
-  doctor(); refresh(); setInterval(refresh, 1500);
+  await loadSettings(); doctor(); refresh(); setInterval(refresh, 1500);
 })();
 </script>
 </body>

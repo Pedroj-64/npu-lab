@@ -21,6 +21,19 @@ Example (Qwen2.5-1.5B, "how do I install an AUR package with paru"): without doc
 Run `tldr --update` first (tealdeer or tldr client). Index build: ~1.5 min with a GPU (CPU part: rendering man pages).
 It is a mitigation, not magic: a 1.5B model can still misread a correct page, so read the cited source and run commands yourself.
 
+## Web search and cloud assist (opt-in, configured in the Settings tab)
+- **Web search** (Chat tab, "web search"): the server searches, reads the top pages and gives the model short excerpts, then shows the
+  sources. Providers: DuckDuckGo and Wikipedia (no key), your own SearXNG, or Brave (API key). The server refuses to fetch anything
+  that resolves to a private/loopback address, so it cannot be used to reach your LAN. Treat web text as untrusted: the model has no
+  tools, it can only be misled, so check the cited links.
+- **Cloud assist** (Chat tab, backend "Cloud"): bring your own key for any OpenAI-compatible endpoint (NVIDIA NIM / Nemotron,
+  OpenRouter, Ollama...) or Gemini; "List models" asks the provider which models exist so you do not guess names. It is per message and
+  clearly labelled: your question and the conversation leave the PC. Your indexed files are never sent; docs/web excerpts only if you tick
+  "also send the excerpts". Keys live in `~/.config/npu-lab/providers.json` (mode 0600), are write-only from the UI and never appear in
+  responses or errors. Free tiers often train on your data: read your provider's terms.
+- The chat renders Markdown (code blocks with a copy button and light highlighting, lists, links), shows what it is doing (searching docs,
+  searching the web, reading N tokens, writing), folds reasoning (`<think>`) into a collapsible block, and remembers the conversation.
+
 ## Platform support (read this first)
 | Part | Linux | Windows |
 |---|---|---|

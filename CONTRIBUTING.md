@@ -14,7 +14,7 @@ custom kernels. Small, measured, reproducible contributions are the most useful.
 1. **Measure, don't guess.** Performance claims need a script or command in `bench/` and the result in `bench/RESULTS.md`.
 2. **Keep the NPU central.** GPU/CPU paths are optional helpers: never make `torch`/CUDA a hard requirement,
    and keep VRAM and CPU use capped and configurable.
-3. **Privacy first.** The file-search feature reads private data. Never commit an index, a rules file with real paths,
+3. **Privacy first.** API keys live only in the user's config, never in code, logs, errors, tests or responses. The file-search feature reads private data. Never commit an index, a rules file with real paths,
    model weights, `build/` output, or anything under `~/.config/npu-lab` or `~/.local/share/npu-lab`.
    Strip usernames, hostnames, e-mails and absolute home paths from logs and examples. Do not weaken the default deny lists.
 4. **Small diffs.** Match the surrounding style, add comments only where the reason is not obvious, no speculative abstractions.
@@ -22,7 +22,7 @@ custom kernels. Small, measured, reproducible contributions are the most useful.
 
 ## Workflow
 1. Fork, create a branch, make a focused change.
-2. Run the relevant checks: `python tests/test_server.py`, `cd launcher && cargo test`, `python src/minilm.py models/multi`,
+2. Run the relevant checks: `python tests/test_server.py`, `python tests/test_cloud.py`, `cd launcher && cargo test`, `python src/minilm.py models/multi`,
    `python bench/matvec8_npu.py ...`, `python src/qwen_npu.py "prompt"` (see the README for setup).
 3. Open a pull request describing the change and the numbers.
 
