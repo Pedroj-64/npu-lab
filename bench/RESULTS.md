@@ -34,3 +34,40 @@ Run: `python bench/minilm_npu_vs_cpu.py`
 | NPU linears | 181 ms | cosine vs CPU: min 0.996, mean 0.997 |
 
 Roughly a tie at this model size. The win to measure next is CPU load / power, not latency.
+
+## Matrix-vector (LLM decode shape), mlir-aie `matrix_vector`, 1 core, i16
+`python bench/matvec_npu.py <xclbin> <insts> M K` (y = A @ x, A streamed from RAM every call)
+
+| M x K | us/call | weights | GB/s |
+|------:|--------:|--------:|-----:|
+| 128 x 896  | 138  | 0.23 MB | 1.7 |
+| 896 x 896  | 352  | 1.61 MB | 4.6 |
+| 4864 x 896 | 1438 | 8.72 MB | 6.1 |
+
+Fit: ~100 us fixed cost per call + ~6.5 GB/s streaming on one core.
+Rough Qwen2.5-0.5B decode estimate with this kernel as-is (i16, 1 core): ~200+ ms/token (~4 tok/s).
+Levers: more cores, int8 weights, fewer launches (fuse layers).
+
+## Multi-core matvec (`src/kernels/matvec.py --n-cores N`, device `from_name("npu", n_cols=N)`)
+| M x K | cores | us/call | GB/s |
+|------:|------:|--------:|-----:|
+| 896 x 896  | 1 | 346 | 4.6 |
+| 896 x 896  | 2 | 287 | 5.6 |
+| 896 x 896  | 4 | 206 | 7.8 |
+| 4864 x 896 | 1 | 1438 | 6.1 |
+| 4864 x 896 | 4 | 633 | 13.8 |
+
+(The default device is a 1-column partition; with >1 core the design only fits if the
+device is built with as many columns as cores.)
+
+## Qwen2.5-0.5B-Instruct decode (`src/qwen_npu.py`)
+All dense layers on the NPU (4-core i16 matvec, qkv and gate+up fused, lm_head in 16 chunks),
+the rest in numpy. Greedy decoding, same answers as the float32 numpy version on the test prompts.
+
+| backend | decode speed |
+|---|---|
+| numpy float32 (CPU) | 2.2 tok/s |
+| NPU | 8.0 tok/s (80 tokens, steady) |
+
+~92% of wall time is spent inside NPU calls (~97 per token). Next levers: 8-bit weights
+(half the bytes), more cores per column, fewer/larger launches.
