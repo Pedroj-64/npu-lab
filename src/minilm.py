@@ -3,20 +3,23 @@
 Every dense layer goes through `linear`, so a different backend (the NPU)
 can be swapped in by passing `linear=` to `MiniLM`.
 """
+import json, sys
 import numpy as np
 from safetensors import safe_open
 from scipy.special import erf
 from tokenizers import Tokenizer
 
 D = "models/minilm"
-H, NH, L = 384, 12, 6
+H, NH = 384, 12
 
 
 def cpu_linear(x, w, b):
     return x @ w.T + b
 
 
-def gelu(x):
+def gelu(x, fast=False):
+    if fast:  # tanh approximation, ~1e-3 off but several times cheaper than erf
+        return 0.5 * x * (1 + np.tanh(np.float32(0.7978845608) * (x + np.float32(0.044715) * x * x * x)))
     return 0.5 * x * (1 + erf(x * np.float32(0.7071067811865476)))
 
 
@@ -27,13 +30,15 @@ def layer_norm(x, w, b, eps=1e-12):
 
 
 class MiniLM:
-    def __init__(self, linear=cpu_linear, d=D):
+    def __init__(self, linear=cpu_linear, d=D, max_len=256, fast_gelu=False):
         f = safe_open(f"{d}/model.safetensors", "np")
         self.w = {k: f.get_tensor(k).astype(np.float32) for k in f.keys()}
         self.tok = Tokenizer.from_file(f"{d}/tokenizer.json")
-        self.tok.enable_truncation(256)
+        self.tok.enable_truncation(max_len)
         self.tok.enable_padding()
         self.linear = linear
+        self.fast_gelu = fast_gelu
+        self.L = json.load(open(f"{d}/config.json"))["num_hidden_layers"]
 
     def encode(self, texts):
         w, lin = self.w, self.linear
@@ -46,7 +51,7 @@ class MiniLM:
              + w["embeddings.token_type_embeddings.weight"][0])
         x = layer_norm(x, w["embeddings.LayerNorm.weight"], w["embeddings.LayerNorm.bias"])
         bias = (1 - mask)[:, None, None, :] * -1e9
-        for i in range(L):
+        for i in range(self.L):
             p = f"encoder.layer.{i}."
             flat = x.reshape(B * T, H)
 
@@ -62,7 +67,7 @@ class MiniLM:
             a = lin(ctx, w[p + "attention.output.dense.weight"], w[p + "attention.output.dense.bias"])
             x = layer_norm(a.reshape(B, T, H) + x, w[p + "attention.output.LayerNorm.weight"],
                            w[p + "attention.output.LayerNorm.bias"])
-            h = gelu(lin(x.reshape(B * T, H), w[p + "intermediate.dense.weight"], w[p + "intermediate.dense.bias"]))
+            h = gelu(lin(x.reshape(B * T, H), w[p + "intermediate.dense.weight"], w[p + "intermediate.dense.bias"]), self.fast_gelu)
             o = lin(h, w[p + "output.dense.weight"], w[p + "output.dense.bias"]).reshape(B, T, H)
             x = layer_norm(o + x, w[p + "output.LayerNorm.weight"], w[p + "output.LayerNorm.bias"])
         e = (x * mask[:, :, None]).sum(1) / mask.sum(1, keepdims=True)
@@ -70,9 +75,9 @@ class MiniLM:
 
 
 if __name__ == "__main__":
-    m = MiniLM()
+    m = MiniLM(d=sys.argv[1] if len(sys.argv) > 1 else D)
     t = ["The cat sits on the mat", "A kitten is resting on a rug",
-         "Quarterly tax filing deadline", "El gato duerme en la alfombra"]
+         "Quarterly tax filing deadline", "El gato duerme en la alfombra", "Fecha límite para declarar impuestos"]
     e = m.encode(t)
     print(np.round(e @ e.T, 3))
     assert e[0] @ e[1] > e[0] @ e[2], "cat/kitten should beat cat/tax"
