@@ -52,3 +52,23 @@ try:
     print("chats api ok")
 finally:
     p.terminate()
+
+# project mode through the HTTP API (no model): the folder setting and the apply endpoint
+p = subprocess.Popen([sys.executable, "-u", os.path.join(ROOT, "src", "serve.py")], cwd=ROOT, stdout=subprocess.PIPE, text=True,
+                     env={**os.environ, "NPU_LAB_TOKEN": T, "NPU_LAB_CHATS": tmp + "/c2", "NPU_LAB_FACTS": tmp + "/f2.json", "NPU_LAB_RULES": tmp + "/rules2.json", "NPU_LAB_DOCS": tmp + "/d2", "NPU_LAB_ROUTING": tmp + "/r2.json", "NPU_LAB_SETTINGS": tmp + "/s2.json"})
+try:
+    port = json.loads(p.stdout.readline())["port"]
+    proj = tempfile.mkdtemp(dir=os.path.expanduser("~"))              # must be inside the home
+    open(proj + "/a.py", "w").write("x = 1\n")
+    blk = "a.py\n<<<<<<< SEARCH\nx = 1\n=======\nx = 2\n>>>>>>> REPLACE\n"
+    assert call("/project/apply", {"text": blk})[0] == 409                                   # no project set: refuses
+    assert call("/rules", {"project_root": "/etc"})[0] == 400 and call("/rules", {"project_root": "/nonexistent"})[0] == 400
+    assert call("/rules", {"project_root": proj})[1]["project_root"] == os.path.realpath(proj)
+    s, r = call("/project/apply", {"text": blk, "dry": True}); assert s == 200 and r["results"][0]["action"] == "edit" and open(proj + "/a.py").read() == "x = 1\n", (s, r)
+    s, r = call("/project/apply", {"text": blk}); assert open(proj + "/a.py").read() == "x = 2\n", r
+    assert call("/project/apply", {"text": "../x.py\n<<<<<<< SEARCH\n=======\nz\n>>>>>>> REPLACE\n"})[1]["results"][-1]["action"] == "failed"
+    assert call("/rules", {"project_root": ""})[1]["project_root"] == ""
+    print("project api ok")
+finally:
+    p.terminate()
+    import shutil; shutil.rmtree(proj, ignore_errors=True)

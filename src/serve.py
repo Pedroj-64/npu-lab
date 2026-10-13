@@ -8,7 +8,7 @@ Security model: binds 127.0.0.1 on a random port; every API request needs `Autho
 URL fragment, which never reaches the server); the Host header must be loopback; an Origin header is only
 accepted if it is this server's own origin; no CORS headers; only whitelisted models; folders only under $HOME.
 
-API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /chats /facts /doctor /settings   POST /routing /facts /chats/save /chats/load /chats/delete /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
+API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /chats /facts /doctor /settings   POST /routing /facts /project/apply /chats/save /chats/load /chats/delete /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
 """
 import gc, hmac, json, os, re, secrets, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -118,6 +118,14 @@ def set_rules(d):
         if not 2048 <= n <= 262144:
             raise Bad(400, "context_tokens must be between 2048 and 262144")
         r["context_tokens"] = n
+    if "project_root" in d:
+        x = str(d["project_root"]).strip()
+        if x:
+            real = os.path.realpath(os.path.expanduser(x))
+            if not (real.startswith(home + os.sep)) or not os.path.isdir(real):
+                raise Bad(400, f"the project must be an existing folder inside your home: {x}")
+            x = real
+        r["project_root"] = x
     if "save_chats" in d:
         r["save_chats"] = bool(d["save_chats"])
     if "gpu_vram_gb" in d:
@@ -460,6 +468,12 @@ class H(BaseHTTPRequestHandler):
             except documents.DocError as e:
                 raise Bad(400, str(e))
             self._send(200, {"documents": documents.listing()})
+        elif self.path == "/project/apply":      # writes files: only inside the chosen project, all or nothing, and only when the user pressed Apply
+            import project, search
+            root = search.rules().get("project_root", "")
+            if not root or not os.path.isdir(root):
+                raise Bad(409, "no project folder is set (Settings)")
+            self._send(200, {"results": project.apply(root, str(d.get("text", ""))[:400000], dry=bool(d.get("dry")))})
         elif self.path == "/facts":
             import facts
             try:
@@ -599,7 +613,12 @@ class H(BaseHTTPRequestHandler):
                     self._line({"done": True, "stats": {"backend": "cloud", "seconds": round(time.time() - t0, 1)}})
                 else:
                     pieces = []
-                    for piece in S.engine.stream(prompt, n, ctx or None, history, lambda name, **kw: self._line({"phase": name, **kw}), system=__import__("facts").as_system(__import__("qwen_npu").SYSTEM)):
+                    system, root, ask = __import__("facts").as_system(__import__("qwen_npu").SYSTEM), rl.get("project_root", ""), prompt
+                    if root and os.path.isdir(root):          # project mode: the map in the (cached) system prompt, the files the question names in the question
+                        import project
+                        system += project.system_block(root)
+                        ask = project.attach(prompt, root)    # `prompt` stays the plain question: it is what the history keeps
+                    for piece in S.engine.stream(ask, n, ctx or None, history, lambda name, **kw: self._line({"phase": name, **kw}), system=system):
                         pieces.append(piece)
                         self._line({"token": piece})
                     self._line({"done": True, "stats": {"backend": "local", **S.engine.stats}})

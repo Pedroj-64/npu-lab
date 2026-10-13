@@ -97,6 +97,10 @@
       <button class="b pri" id="send">Send</button><button class="b" id="stop" disabled>Stop</button><button class="b" id="newchat">New chat</button>
       <select id="backend" title="Where the answer is generated"><option value="local">Local · NPU</option><option value="cloud" disabled>Cloud (set up in Settings)</option></select>
     </div>
+    <div class="row" style="margin-top:8px" id="projrow">
+      <label title="The model sees a map of this folder and proposes edits; nothing is written until you press Apply on an answer.">project folder <input id="projroot" placeholder="empty = no project, e.g. ~/code/app" style="width:280px"></label>
+      <button class="b" id="setproj">Set</button><button class="b" id="clearproj">Clear</button><span class="dim" id="projnote"></span>
+    </div>
     <div class="row" style="margin-top:8px" id="chatsrow">
       <label title="Off by default. Chats are stored as files on this PC only."><input type="checkbox" id="savechats"> save chats on this PC</label>
       <select id="chatlist"></select><button class="b" id="openchat">Open</button><button class="b" id="delchat">Delete</button><button class="b" id="exportchat" title="Download this chat as Markdown">Export .md</button>
@@ -319,6 +323,18 @@ $("loadllm").onclick = async () => { $("loadllm").disabled = true; $("llmstate")
   try { await api("/mode", { mode: "llm", model: $("llmsel").value }); toast("Model loaded"); } catch (e) { toast(e.message); } $("loadllm").disabled = false; refresh(); };
 $("unload").onclick = async () => { try { await api("/mode", { mode: "none" }); toast("NPU is free"); } catch (e) { toast(e.message); } refresh(); };
 let CHAT_ID = "", CHAT_TITLE = "";
+const setProject = async v => { try { const r = await api("/rules", { project_root: v }); $("projroot").value = r.project_root || ""; $("projnote").textContent = r.project_root ? "project mode: the model sees a map of this folder (edits need your Apply)" : ""; } catch (e) { toast(e.message); } };
+$("setproj").onclick = () => setProject($("projroot").value.trim()); $("clearproj").onclick = () => setProject("");
+function addApply(box, text) {    // an answer with SEARCH/REPLACE blocks: show what would change, write only after the user confirms
+  const b = mk("button", "b", "Apply the edits…");
+  b.onclick = async () => { try {
+    const d = await api("/project/apply", { text, dry: true }); const bad = d.results.find(r => r.action === "failed" || r.action === "none");
+    if (bad) { toast((bad.file ? bad.file + ": " : "") + bad.error); return; }
+    if (!confirm("Apply to your project?\n\n" + d.results.map(r => r.action + "  " + r.file).join("\n"))) return;
+    const r = await api("/project/apply", { text }); toast("Applied: " + r.results.map(x => x.file).join(", ")); b.disabled = true;
+  } catch (e) { toast(e.message); } };
+  box.append(b);
+}
 const newChatId = () => (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : Math.random().toString(36).slice(2) + Date.now().toString(36)).slice(0, 24);
 $("newchat").onclick = () => { HISTORY = []; CHAT_ID = CHAT_TITLE = ""; $("log").textContent = ""; $("stats").textContent = ""; };
 async function refreshChats() {
@@ -374,6 +390,7 @@ async function send(o = {}) {   // o: {prompt, docs, web, cloud} re-asks the sam
     msg.done = true; setPhase(""); renderMsg(msg);
     if (msg.text) HISTORY.push({ role: "user", content: prompt }, { role: "assistant", content: msg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim() });
     abort = null; $("send").disabled = false; $("stop").disabled = true; refresh(); saveChat();
+    if (msg.text.includes("<<<<<<< SEARCH")) addApply(box, msg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, ""));
   };
   let raf = 0; const draw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderMsg(msg); $("log").scrollTop = 1e9; }); };
   try {
@@ -517,7 +534,7 @@ addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("chatcard")
   show("setup");
   try { const s = await api("/status"); for (const m of s.models) $("llmsel").append(new Option(({ qwen35s: "Qwen3.5-0.8B · fast (Assisted)", qwen35m: "Qwen3.5-2B · medium (Assisted)", qwen35l: "Qwen3.5-4B · quality, slow (Assisted)", qwen3: "Qwen3-1.7B · medium (NPU only ok)", qwen3s: "Qwen3-0.6B · fast (NPU only ok)" })[m] || m, m)); $("llmsel").value = s.models.includes("qwen35m") ? "qwen35m" : s.models.includes("qwen3") ? "qwen3" : s.models[0];
     { const rl = await api("/rules"); $("roots").value = rl.roots.join("\n"); $("vram").value = rl.llm_vram_gb ?? 4.0; $("ctxwin").value = rl.context_tokens ?? 80000; $("compact").value = Math.round((rl.compact_at ?? 0.7) * 100); $("gshare").value = String(rl.gpu_share ?? 0); $("scache").value = rl.state_cache_gb ?? 8; } } catch (e) { toast(e.message); }
-  await loadSettings(); api("/rules").then(r => { $("savechats").checked = !!r.save_chats; }).catch(() => {}); api("/facts").then(r => { $("facts").value = r.facts.join("\n"); }).catch(() => {}); refreshChats(); doctor(); refresh(); pollDocs().catch(() => {}); setInterval(refresh, 1500);
+  await loadSettings(); api("/rules").then(r => { $("savechats").checked = !!r.save_chats; if (r.project_root) { $("projroot").value = r.project_root; $("projnote").textContent = "project mode: the model sees a map of this folder (edits need your Apply)"; } }).catch(() => {}); api("/facts").then(r => { $("facts").value = r.facts.join("\n"); }).catch(() => {}); refreshChats(); doctor(); refresh(); pollDocs().catch(() => {}); setInterval(refresh, 1500);
 })();
 </script>
 </body>
