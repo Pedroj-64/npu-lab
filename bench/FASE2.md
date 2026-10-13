@@ -1,0 +1,8 @@
+# Fase 2, paso 2: lotes (13 oct 2026)
+
+Etiquetas: **[medido]**, **[leído en código]**, **[estimado]**, **[propuesto]**. Todo lo de Qwen3.5 que use la GPU: **[medido, GPU degradada]** (`bench/ENERGY.md`: 2.5 TFLOPS, memoria a 780 MHz). `mv_i8_i8` sigue en espera y no se escribe. Cada lote fija su criterio de éxito ANTES de medir (commit previo a los resultados), n >= 3 y cambios de comportamiento tras una bandera apagada por defecto.
+
+## Lote A. Descomposición de lo que queda fuera de la espera de la NPU (Qwen3.5-2B y 4B)
+**Qué se mide:** por token, el tiempo del paso (`Qwen35.step`) repartido en: espera de la NPU, resto del coste de las llamadas NPU (preparar, enviar, recoger), pasos de la GPU (`linear_step` de las capas DeltaNet y `attn_step` de las de atención completa, que incluyen la subida/bajada de datos, porque devuelven NumPy), cabeza de salida (`lm`), y el pegamento de CPU (embedding, normas, SiLU, sumas residuales). Instrumentación en el propio script (copia del paso con relojes), sin tocar `src/`; el reparto por GPU queda a 0 %.
+**Criterio de éxito:** (1) la copia instrumentada devuelve exactamente los mismos logits que `Qwen35.step` sobre 5 pasos fijos (diferencia 0); (2) las partes suman el paso total con un error <= 5 %; (3) 3 corridas de 48 tokens por modelo, media ± desviación, desviación del total <= 5 %; (4) se identifica la parte mayor fuera de la espera y se estima su cota inferior (qué parte es lanzamiento/sincronización y qué parte cálculo) con una medida, no con una suposición.
+**Qué NO se concluye:** nada sobre una GPU sana; las cifras de GPU son de una GPU degradada.
