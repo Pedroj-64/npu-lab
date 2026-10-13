@@ -67,6 +67,7 @@
   <div class="card"><h2>Resource profile</h2>
     <label><input type="radio" name="prof" value="npu_only"> <b>NPU only</b> <span class="dim">— the NPU does everything (prompt reading too, ~90 tok/s; 4k context); the GPU is never touched</span></label><br>
     <label><input type="radio" name="prof" value="assisted"> <b>Assisted</b> <span class="dim">— the NPU still generates every token; the GPU also reads prompts (~20x faster), keeps the KV cache and attention (8k+ context), and may speed up indexing</span></label>
+    <div class="dim" style="margin-top:6px;font-size:12.5px">Efficiency, measured here (plugged in, <code>bench/ENERGY.md</code>): Qwen3-1.7B decoding 0.27 tokens/J NPU only vs 0.25 Assisted (a tie); reading prompts 2.4 tokens/J NPU only vs 8.1 Assisted (5x faster). Qwen3.5-2B: 0.19 tokens/J at 0% and 25% GPU share (25% is 26% faster), 0.12 at 50%. Whole-machine watts (APU + GPU), screen not included.</div>
     <div class="row" style="margin-top:12px">
       <label class="f">GPU memory the model may use (GB)<input type="number" id="vram" min="1" max="6" step="0.5" style="width:90px"></label>
       <label class="f">Context window (tokens)<input type="number" id="ctxwin" min="2048" max="262144" step="2048" style="width:120px"></label>

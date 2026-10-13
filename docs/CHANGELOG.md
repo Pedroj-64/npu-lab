@@ -3,6 +3,13 @@
 What is built, with the numbers measured when it was built. Moved verbatim from the old `ROADMAP.md` (Oct 2026); what is still open lives in
 [`../ROADMAP.md`](../ROADMAP.md) and the reasons for not building things in [`DECISIONS.md`](DECISIONS.md). Newest measurements first in section 0.
 
+## Fase 1 (13 oct 2026): energía y eficiencia
+Detalle, método y tablas en [`../bench/ENERGY.md`](../bench/ENERGY.md) (`bench/energy.py`, 3 corridas por fila, APU por hwmon `amdgpu` + GPU por `nvidia-smi`; RAPL es solo root).
+- **Qwen3-1.7B, decode:** NPU-only 8.91 ± 0.22 tok/s, 32.7 W, 0.27 tok/J; Asistido 8.54 ± 0.10, 34.8 W, 0.25 tok/J (empate). **Prompt:** NPU-only 76.9 tok/s, 2.35 tok/J; Asistido 399 tok/s, 8.06 tok/J.
+- **Qwen3.5-2B, decode:** reparto 0 % 7.08 tok/s, 37.6 W, 0.19 tok/J; 25 % 8.92 tok/s, 48.1 W, 0.19 tok/J; 50 % 6.10 tok/s, 50.3 W, 0.12 tok/J. Prompt (4096): 321 tok/s, 6.5 tok/J.
+- **Hallazgo:** durante la medición la GPU rendía 2.4-2.5 TFLOPS fp16 (documentado 11.5), P5 con memoria a 780 MHz y `SW Power Cap` activo; por eso las cifras con GPU (prefill ~320 tok/s, reparto 50 % sin ganancia) no reproducen las de este archivo. Causa sin determinar.
+- UI: línea de eficiencia (texto fijo con estas cifras) en la tarjeta "Resource profile".
+
 ## Fase 0 (13 oct 2026, rama `perf/medicion`): orden y preguntas abiertas cerradas
 Detalle, tablas y método en [`../bench/PERF.md`](../bench/PERF.md) §8. Todo medido solo con NPU, un proceso a la vez, 3 corridas.
 - **Atención NPU-only (caché head-major, sin copia float64): mismos tokens.** 5 de 5 prompts idénticos en Qwen3-0.6B y en Qwen3-1.7B, 3 de 3 corridas, frente a la atención antigua (`bench/token_equiv.py`). Decode de la 0.6B, paso en ms a 16 / 256 / 1024 / 2048 / 3500 tokens de contexto: 54.5 / 57.2 / 79.9 / 106.5 / 146.3 (±≤1.8; antes 52 / 99 / 290 / 556 / 1056, una corrida).
