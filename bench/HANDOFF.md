@@ -96,3 +96,5 @@ Marcas como arriba: **[medido]**, **[leído en código]**, **[pendiente]**. Esta
 ### Cómo repetir las pruebas (todas acotadas)
 - Offline, segundos: `python tests/test_chats.py`, `python tests/test_facts.py`, `python tests/eval_routing.py`, `python tests/test_documents.py`.
 - Con NPU/GPU, solas: `python tests/test_server.py` (~105 s, 19 PASS) · `python tests/eval_long_chat.py --model qwen35s|qwen35m|qwen35l --turns 48 --deadline 600` (0.8B ≈2 min, 2B ≈6 min, 4B más; sigue el archivo con `tail -f`) · `python bench/vram_ctx.py models/qwen35_4b 4.0 5.0 5.5` (solo GPU) · `python bench/perf_baseline.py --model models/qwen3s` (solo NPU-only).
+
+**Actualización (líneas fijadas):** `src/pins.py` + `tests/test_pins.py` copian literalmente las frases del usuario con datos duros al inicio de las notas de `compact()`. 0.8B: pasa las 3 preguntas de memoria tras compactar (antes olvidaba las 3); sigue fallando la edición de código por capacidad y la parada de ~30 s. **Pendiente:** compactación en segundo plano + resumen incremental; repetir con 4B (puerto 8431→8432) y 2B.

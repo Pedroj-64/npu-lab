@@ -211,6 +211,8 @@ def compact(history, window, at, keep, phase):
         phase(done=k, of=len(pieces))
         notes = S.engine.complete(f"Previous notes:\n{notes or '(none)'}\n\nNext part of the conversation:\n{piece}\n\nWrite the updated notes.",
                                   SUMMARY_SYSTEM, 400).strip()
+    import pins
+    notes = pins.block(pins.pin(old)) + notes                   # the user's own fact lines word for word: a summary may drop or change a digit
     pair = [{"role": "user", "content": "[Notes of the earlier conversation]\n" + notes}, {"role": "assistant", "content": "Understood, I will use those notes."}]
     return pair + recent, {"summary": notes, "kept": len(recent)}
 
