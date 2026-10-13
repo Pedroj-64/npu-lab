@@ -3,6 +3,17 @@
 What is built, with the numbers measured when it was built. Moved verbatim from the old `ROADMAP.md` (Oct 2026); what is still open lives in
 [`../ROADMAP.md`](../ROADMAP.md) and the reasons for not building things in [`DECISIONS.md`](DECISIONS.md). Newest measurements first in section 0.
 
+## Fase 5, lote 2 (13 oct 2026): puerta de inyección de documentos
+Criterios, banco v2 (1091 consultas) y resultados en [`../bench/FASE56.md`](../bench/FASE56.md). [medido, CPU] `src/gate.py` (apagado): inyección en negativos difíciles 0.578 -> 0.043 en palabras corrientes con nombre de comando (plantillas) y 0.588 -> 0.235 en preguntas técnicas naturales (n = 17), recall@4 sin pérdida medible, +34 ms. Cumple el margen escrito (G1-G4); se propone encender con tu OK. El ranking híbrido BM25 da +0.038 de recall@4 [+0.005, +0.076]: no llega al margen de +0.05, sigue apagado.
+
+## Bloque 1 con GPU sana (13 oct 2026)
+Criterios y resultados en [`../bench/PROPUESTA_GPU_SANA.md`](../bench/PROPUESTA_GPU_SANA.md). [medido, GPU sana]
+- **Lote A repetido:** paso del 2B 136.0 -> 110.5 ms y del 4B 293.1 -> 232.3 ms; DeltaNet de la GPU 28.0 -> 4.9 ms (2B); la espera de la NPU es ahora el 80-84 % del paso. Fusionar lanzamientos de DeltaNet no merece la pena (techo 4.4 %). Detalle: `bench/FASE2.md`.
+- **4B con reparto:** 25 % +18 % y 50 % +60 % de velocidad con los mismos 0.11 tok/J, pero 5277 y 5755 MiB de pico (hueco libre 867 y 389 MiB): no cumplen el hueco de 1 GB.
+- **Barrido 60-75 % del 2B:** hubo que compilar 15 kernels de NPU (80 s); 50 % 13.60, 60 % 15.47, 65 % 16.98, 70 % 17.63, 75 % 18.19 tok/s (+34 %) con tok/J ~0.30-0.31 y 4.07 GB de pico. Un texto de 5 cambia con cualquier reparto distinto de 0 (casi empate numérico).
+- **Fase 3, reuso del prefijo:** caliente en el mismo proceso relee 102 de 7270 tokens (19-23x más rápido, logits idénticos); el caché en disco solo acierta con el mismo prompt, no con una pregunta distinta.
+- **1.7B:** solo NPU ~13 % más eficiente que Asistido en decode (real, no ruido); los tok/J absolutos cambian ~15 % entre sesiones.
+
 ## Fase 2, paso 3 (13 oct 2026): int4 simulado en CPU
 Detalle en [`../bench/INT4_SIM.md`](../bench/INT4_SIM.md); criterio commiteado antes de medir. [medido, CPU, determinista]
 - 24 configuraciones (Qwen3-1.7B y Qwen3.5-2B; grupos 32/64/128; simétrica y asimétrica; todo int4 o cabeza en int8): **ninguna cumple** (coseno >= 0.99, perplejidad <= +3 % frente a int8, 4 de 5 textos idénticos). La mejor, B_g32_asym: coseno 0.980 / 0.977, perplejidad +4.6 % / +9.6 %, 1 de 5 textos idénticos. int4 sin calibración descartado. Bytes por token reproducen el motor (int8: 1723 y 1885 MB/token).
