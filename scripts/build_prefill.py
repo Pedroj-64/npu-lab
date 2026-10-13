@@ -1,5 +1,5 @@
 """Build the bf16 prefill matmul kernels a model needs.
-usage: python scripts/build_prefill.py models/qwen [models/qwen15 ...]
+usage: python scripts/build_prefill.py models/qwen3 [models/qwen3s ...]
 Needs .venv/bin on PATH and PEANO_INSTALL_DIR set (see README)."""
 import json, os, subprocess, sys
 sys.path.insert(0, "src")
