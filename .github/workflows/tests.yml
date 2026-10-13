@@ -1,0 +1,18 @@
+name: tests
+# Only the offline tests: no NPU, no GPU, no model files. test_server.py and the eval_* scripts need the hardware and are not run here.
+on:
+  push:
+  pull_request:
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy pillow tokenizers safetensors scipy ml_dtypes
+      - run: |
+          for t in test_agent test_project test_compact test_pins test_documents test_chats; do
+            echo "== $t"; python tests/$t.py || exit 1
+          done

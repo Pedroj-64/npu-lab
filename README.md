@@ -47,7 +47,8 @@ It is a mitigation, not magic: a 1.5B model can still misread a correct page, so
 | NPU backends (kernels, LLM, embeddings) | **Yes**, tested on CachyOS with `amdxdna` + XRT | **Not supported yet.** The NPU is driven by AMD's Ryzen AI stack there, which this project does not use or test |
 | GPU embedding helper (`--device gpu`) | Yes (NVIDIA/CUDA tested) | Untested |
 | CPU fallback (`--device cpu`) | Yes | Should work (plain numpy), untested |
-| Launcher (planned, Rust) | Planned | Planned (portable code; it can only use the backends above that exist on that OS) |
+| Launcher (`launcher/`, Rust, one small binary) | **Yes**, built and used on CachyOS | Has Windows branches in the code, never built or run there; it can only use the backends above that exist on that OS |
+| Web UI and terminal chat (`src/chat_cli.py`) | Yes | Untested |
 
 Hardware tested: AMD Ryzen 5 8645HS (XDNA1 / Hawk Point). XDNA2 (Ryzen AI 300) is untested here; the kernels target `npu1`.
 
@@ -83,10 +84,11 @@ The NPU is the center of the project; GPU/CPU are optional helpers, never requir
   | fast | Qwen3.5-0.8B (`models/qwen35_08b`) | Assisted | ~15 tok/s |
   | medium | Qwen3.5-2B (`models/qwen35_2b`) | Assisted | ~9 tok/s; **~13.8 tok/s with a 50% GPU share** |
   | slow, high quality | Qwen3.5-4B (`models/qwen35_4b`) | Assisted | ~4.2 tok/s |
-  | NPU only | Qwen3-1.7B (`models/qwen3`), Qwen3-0.6B (`models/qwen3s`) | nothing | ~9 / ~19 tok/s, 4k context |
+  | NPU only | Qwen3-1.7B (`models/qwen3`), Qwen3-0.6B (`models/qwen3s`) | nothing | ~10 / ~18-20 tok/s at short context, 4k window (see below) |
 
   One model is loaded at a time (Unload, then Load). **Profiles:** *NPU only* never touches the GPU (Qwen3 models, 4096 tokens of
-  context, prompts read by the NPU at ~90 tok/s). *Assisted* lets the GPU read prompts (1000-1800 tok/s), keep the KV cache / DeltaNet
+  context, prompts read by the NPU at ~90-220 tok/s that fall as the prompt grows, because attention runs on one CPU thread; decode of the 0.6B goes from ~18-20 tok/s
+  at short context to ~7 at 3500 tokens; numbers in [`bench/PERF.md`](bench/PERF.md)). *Assisted* lets the GPU read prompts (1000-1800 tok/s), keep the KV cache / DeltaNet
   state and run attention, which gives **long context** (default window 80k tokens, up to 262k; Qwen3.5-2B reads 100k tokens in ~90 s and
   keeps ~8 tok/s), and optionally compute a share (0/25/50%) of every weight matrix next to the NPU. Limits are set in the Setup tab:
   GPU memory the model may use (default 4 GB), context window, when to compact the conversation (the model summarises old turns), GPU share.
@@ -140,7 +142,9 @@ the 6 GB card holds about 22k tokens, the GPU budget is now capped automatically
 local docs, web search, optional cloud assist, agent mode with confirmation. Known limits: Linux only, XDNA1 only, the Assisted profile needs an NVIDIA GPU with CUDA,
 OCR needs `tesseract`, kernels must be built per model (and per GPU share) on your machine.
 
-See [`ROADMAP.md`](ROADMAP.md) for what is next (per-question routing for docs/web, better memory, evaluation, int8 KV / int4 weights to fit more context in 6 GB).
+Docs: [`ROADMAP.md`](ROADMAP.md) (only what is still open, by priority), [`docs/CHANGELOG.md`](docs/CHANGELOG.md) (what is built, with the measured numbers),
+[`docs/DECISIONS.md`](docs/DECISIONS.md) (why, and what was looked at and not built), [`bench/PERF.md`](bench/PERF.md) (performance measurements).
+The offline tests (`tests/test_agent.py`, `test_project.py`, `test_compact.py`, `test_pins.py`, `test_documents.py`, `test_chats.py`) run in CI on every push.
 
 License: MIT.
 
