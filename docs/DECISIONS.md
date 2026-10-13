@@ -3,6 +3,12 @@
 Why things are built the way they are, and what was looked at and NOT built. Moved verbatim from the old `ROADMAP.md` (Oct 2026), plus the
 Phase 0 decisions at the top. Labels in the old text: measured = in `bench/RESULTS.md` / `bench/PERF.md`; estimate = extrapolated; proposal = does not exist.
 
+## Decisión: endpoint OpenAI mínimo para el editor (13 oct 2026)
+- **Solo texto, sin `tools`:** el modelo local no llama herramientas, así que el modo Agent de Copilot no se soporta; el agente propio (`src/agent.py`, web y CLI) sigue siendo el camino con confirmación. Se amplía solo si hay un modelo y un formato de herramientas medidos.
+- **Sin enrutado ni búsqueda:** el editor ya aporta su contexto; meter web/documentos ahí cambiaría el prompt sin que el usuario lo vea.
+- **Token propio, sin claves de terceros:** el único secreto es el token local del usuario (`NPU_LAB_TOKEN`); nada de claves de nube. Escucha solo en 127.0.0.1 como el resto de la API.
+- **La CLI no se comparte:** `chat_cli.py` arranca su propio servidor en puerto aleatorio; para el editor se usa el lanzador. Un solo programa a la vez sobre NPU/GPU.
+
 ## Decisiones de perfiles de GPU y del 75 % (13 oct 2026)
 - **Reparto por modelo, defectos medidos:** 2B 50 %, el resto 0 %. El 75 % del 2B es un perfil opcional "máxima velocidad" con aviso (~60 W, tok/J ~0.30 frente a 0.35 del 50 % en la sesión del 12:59); el 4B al 25 % es opt-in con aviso (~580 MiB libres reales, no 867: CUDA ve 5857 MiB de los 6144; con el margen por defecto de 700 MiB la carga se niega y hay que bajarlo a <= 580). El 4B nunca al 50 % (~102 MiB libres reales, un OOM recuperado). Un reparto escalar de un archivo de reglas antiguo se **ignora** (aplicaba el mismo valor a todos los modelos, también al 4B).
 - **Lote del 75 % (`bench/PROPUESTA_GPU_SANA.md`), criterio 5: "no cumplido por la letra, en sentido favorable, causa no verificada".** El criterio, tal como se escribió antes de medir, decía: la media de los 3 procesos sostenidos dentro de +-3 % de los 18.19 tok/s del barrido corto. Salió 18.56 (+2.0 %), 19.05 (+4.7 %) y 18.94 (+4.1 %): dos de tres fuera, más rápidos y no más lentos. La causa probable (prompt de 14 tokens en vez de 16 aleatorios) no está verificada. El criterio no se reescribe ni se reinterpreta. Los criterios 1-4 y la calidad (a) sí se cumplen.

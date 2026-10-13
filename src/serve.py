@@ -1,6 +1,6 @@
 """Local engine server for the launcher (one mode loaded at a time: LLM chat or semantic search).
 
-  NPU_LAB_TOKEN=... python src/serve.py        # prints {"port": N} on stdout when ready
+  NPU_LAB_TOKEN=... [NPU_LAB_PORT=8765] python src/serve.py        # prints {"port": N} on stdout when ready
 
 Serves the web UI (web/index.html) at / and a JSON API under the same origin.
 Security model: binds 127.0.0.1 on a random port; every API request needs `Authorization: Bearer <token>`
@@ -8,6 +8,7 @@ Security model: binds 127.0.0.1 on a random port; every API request needs `Autho
 URL fragment, which never reaches the server); the Host header must be loopback; an Origin header is only
 accepted if it is this server's own origin; no CORS headers; only whitelisted models; folders only under $HOME.
 
+OpenAI-compatible (for editors, loaded model only): GET /v1/models   POST /v1/chat/completions (stream or not; no tools).
 API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /chats /facts /doctor /settings   POST /routing /facts /agent/run /project/apply /chats/save /chats/load /chats/delete /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
 """
 import gc, hmac, json, os, re, secrets, subprocess, sys, threading, time
@@ -522,6 +523,8 @@ class H(BaseHTTPRequestHandler):
                              "context": getattr(S.engine, "max_ctx", None), "context_limited": getattr(S.engine, "ctx_limited", False),
                              "cloud": bool(__import__("settings").load()["cloud"]["active"]),
                              "models": [m for m in MODELS if os.path.isdir(os.path.join(ROOT, MODELS[m]))]})
+        elif self.path == "/v1/models":          # OpenAI-compatible, for VS Code Copilot and other clients
+            self._send(200, {"object": "list", "data": [{"id": m, "object": "model", "owned_by": "npu-lab"} for m in MODELS if os.path.isdir(os.path.join(ROOT, MODELS[m]))]})
         elif self.path == "/routing":
             import router
             self._send(200, {**router.load(), "defaults": router.DEFAULTS})
@@ -545,7 +548,7 @@ class H(BaseHTTPRequestHandler):
             raise Bad(404, "not found")
 
     def _post(self):
-        d = self._body(CHAT_BODY if self.path == "/chat" else MAX_BODY)
+        d = self._body(CHAT_BODY if self.path in ("/chat", "/v1/chat/completions") else MAX_BODY)
         if self.path == "/mode":
             set_mode(d.get("mode"), d.get("model"), d.get("device", "npu"))
             self._send(200, {"mode": S.mode, "model": S.model})
@@ -640,6 +643,8 @@ class H(BaseHTTPRequestHandler):
                 raise Bad(502, str(e))
         elif self.path == "/chat":
             self._chat(d)
+        elif self.path == "/v1/chat/completions":
+            self._openai(d)
         elif self.path == "/search":
             self._search(d)
         elif self.path == "/index":
@@ -766,6 +771,45 @@ class H(BaseHTTPRequestHandler):
             if not cloud:
                 S.npu_lock.release()
 
+    def _openai(self, d):
+        """POST /v1/chat/completions (OpenAI format, stream or not) on the loaded local model: same engine, no routing/web/docs.
+        ponytail: ignores `tools` (the local model cannot call them: Copilot Ask mode works, Agent mode does not) and the `model` field (the loaded model answers)."""
+        if S.mode != "llm":
+            raise Bad(409, "not in llm mode: load a model first")
+        text = lambda c: c if isinstance(c, str) else "".join(p.get("text", "") for p in c or [] if isinstance(p, dict))
+        msgs = [(m.get("role"), text(m.get("content"))) for m in d.get("messages") or [] if isinstance(m, dict)]
+        system = "\n\n".join(c for r, c in msgs if r in ("system", "developer") and c) or None
+        turns = [{"role": r, "content": c} for r, c in msgs if r in ("user", "assistant") and c]
+        if not turns or turns[-1]["role"] != "user":
+            raise Bad(400, "the last message must be from the user")
+        n = max(1, min(int(d.get("max_tokens") or d.get("max_completion_tokens") or 1024), MAX_TOKENS))
+        if not S.npu_lock.acquire(blocking=False):
+            raise Bad(409, "busy")
+        try:
+            gen = S.engine.stream(turns[-1]["content"], n, None, turns[:-1], None, system=system)
+            cid, name, t0 = "chatcmpl-" + secrets.token_hex(8), S.model, int(time.time())
+            chunk = lambda delta, fin=None: {"id": cid, "object": "chat.completion.chunk", "created": t0, "model": name, "choices": [{"index": 0, "delta": delta, "finish_reason": fin}]}
+            if d.get("stream"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                send = lambda o: (self.wfile.write(b"data: " + (json.dumps(o) if o != "[DONE]" else o).encode() + b"\n\n"), self.wfile.flush())
+                try:
+                    send(chunk({"role": "assistant"}))
+                    for piece in gen:
+                        send(chunk({"content": piece}))
+                    send(chunk({}, "stop"))
+                    send("[DONE]")
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            else:
+                out = "".join(gen)
+                self._send(200, {"id": cid, "object": "chat.completion", "created": t0, "model": name,
+                                 "choices": [{"index": 0, "message": {"role": "assistant", "content": out}, "finish_reason": "stop"}]})
+        finally:
+            S.npu_lock.release()
+
     def _search(self, d):
         import search
         q = str(d.get("query", "")).strip()
@@ -799,7 +843,7 @@ def main():
         statecache.lock_down(root)
     if os.environ.get("NPU_LAB_WATCH_STDIN") == "1":
         watch_parent()
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    srv = ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("NPU_LAB_PORT", 0))), H)   # fixed port lets VS Code point at it
     srv.daemon_threads = True
     print(json.dumps({"port": srv.server_address[1], **({} if os.environ.get("NPU_LAB_TOKEN") else {"token": TOKEN})}), flush=True)
     try:

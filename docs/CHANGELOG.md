@@ -3,6 +3,9 @@
 What is built, with the numbers measured when it was built. Moved verbatim from the old `ROADMAP.md` (Oct 2026); what is still open lives in
 [`../ROADMAP.md`](../ROADMAP.md) and the reasons for not building things in [`DECISIONS.md`](DECISIONS.md). Newest measurements first in section 0.
 
+## Endpoint compatible con OpenAI para VS Code Copilot (13 oct 2026)
+`GET /v1/models` y `POST /v1/chat/completions` (con y sin `stream`) en `src/serve.py`: usan el modelo ya cargado, con su perfil, reparto de GPU y caché. `NPU_LAB_PORT` fija el puerto (sin ella, aleatorio) y el lanzador respeta un `NPU_LAB_TOKEN` propio de 32+ caracteres (si no, genera uno aleatorio como antes). [medido] Con `qwen35s` en perfil Assisted: 9 trozos SSE y `[DONE]` correctos; sin modelo cargado responde 409. NO probado: el cliente real de Copilot (la clave del ajuste `github.copilot.chat.customOAIModels` depende de la versión). Sin herramientas (`tools` se ignora) ni imágenes; no pasa por el enrutado, la búsqueda web ni "mis documentos". Uso en el README.
+
 ## 4B cargable otra vez (13 oct 2026)
 Con `llm_vram_gb` 4.7 y margen 450 MiB el 4B carga en la CLI y en el servidor: ventana 11 636 tokens, 845 MiB libres tras cargar. La comprobación previa descuenta la memoria que el servidor conserva tras descargar otro modelo (cambiar de modelo al 4B se negaba por ~145 MiB) y la reserva de activaciones es el pico medido (64 MiB). Cola siguiente en `ROADMAP.md`.
 

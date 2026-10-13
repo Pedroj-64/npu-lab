@@ -66,13 +66,52 @@ The page (`http://127.0.0.1:<random port>/`) has four tabs:
 - **Search**: semantic search over the folders you allow, with the index controls.
 - **Settings**: web search provider, the words that route a question (Auto mode), and **cloud assist** (pick NVIDIA / OpenRouter /
   OpenAI / Gemini / Ollama, paste a key, Connect).
-Press Ctrl+C in the terminal to stop it.
+Press Ctrl+C in the terminal to stop it. For VS Code Copilot see [Use the local models from VS Code](#use-the-local-models-from-vs-code-copilot-or-any-openai-style-client).
 
 Security: the server listens on `127.0.0.1` only and every API call needs a random token; the link the launcher
 prints carries a **one-time code** (it works once, then it is useless); foreign `Host`/`Origin` headers are refused;
 the API never accepts file paths for models and only lets you read folders inside your home.
 `python tests/test_server.py` checks all of this plus real NPU and GPU round trips (loads each profile, a Qwen3.5 model, compaction);
 `python tests/eval_routing.py` checks the routing rules offline.
+
+## Use the local models from VS Code (Copilot) or any OpenAI-style client
+The server also speaks the OpenAI chat format on the same local address, so an editor can use the model you have loaded (same NPU/GPU
+engine, profile, GPU share and cache as the web page). No account and no cloud key is involved: the only secret is an access token **you invent
+for your own machine**.
+
+1. Make a token (32+ characters) and start the launcher with a fixed port. Keep the token private; do not commit it:
+   ```
+   export NPU_LAB_TOKEN=$(openssl rand -hex 32)
+   NPU_LAB_PORT=8765 ./launcher/target/release/npu          # add --no-browser if you will not use the web page
+   ```
+   (A shorter or missing `NPU_LAB_TOKEN` is ignored and a random token is used, which you could not give to the editor.)
+2. Load a model: in the web page (Chat tab, pick the profile, **Load**), or from the terminal with `curl -H "Authorization: Bearer $NPU_LAB_TOKEN" -d '{"mode":"llm","model":"qwen35m"}' http://127.0.0.1:8765/mode`
+   (Qwen3.5 models need the Assisted profile first: `-d '{"profile":"assisted"}' .../profile`). One model at a time; the editor talks to whichever is loaded.
+3. In VS Code add the model to `settings.json` (adjust the numbers to the context window shown in the Chat tab):
+   ```json
+   "github.copilot.chat.customOAIModels": {
+     "qwen35m": {
+       "name": "Qwen3.5 2B (NPU+GPU, local)",
+       "url": "http://127.0.0.1:8765/v1/chat/completions",
+       "toolCalling": false,
+       "vision": false,
+       "maxInputTokens": 32000,
+       "maxOutputTokens": 2048,
+       "requiresAPIKey": true
+     }
+   }
+   ```
+   Then open the chat model picker, choose **Manage Models**, and when it asks for the API key paste the value of `$NPU_LAB_TOKEN`.
+   The menu names change between Copilot versions; if the entry does not show up, check the setting name in your version.
+4. Check without the editor: `curl -H "Authorization: Bearer $NPU_LAB_TOKEN" http://127.0.0.1:8765/v1/models` lists the models.
+
+What it is and is not: `GET /v1/models` and `POST /v1/chat/completions` (streaming or not). Plain chat and code questions work. **Agent mode and tool
+calls do not** (the local model cannot call tools; `tools` is ignored), and images are not read. This path skips the web page's routing, web search and
+*my documents*: it is the bare model with the editor's own prompt. The same rules as the rest of the API hold: `127.0.0.1` only, token on every call,
+foreign `Host`/`Origin` refused; a request while the model is busy answers 409, and with no model loaded, 409 too.
+
+**Terminal chat** (`python src/chat_cli.py`) is separate: it starts its own server on a random port, so it cannot be shared with the editor or the web
+page. Close one before opening the other (one program at a time on the NPU/GPU). For the editor, use the launcher as above.
 
 ## Modes
 The NPU is the center of the project; GPU/CPU are optional helpers, never required.

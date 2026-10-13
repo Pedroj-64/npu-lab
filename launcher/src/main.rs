@@ -69,7 +69,9 @@ fn main() {
         .or_else(|| std::env::current_exe().ok().and_then(|e| find_root(&e)))
         .unwrap_or_else(|| { eprintln!("could not find the npu-lab folder (src/serve.py). Use --root DIR."); std::process::exit(1) });
 
-    let (token, code) = (rand_hex(32), rand_hex(32));
+    // NPU_LAB_TOKEN set by you (>= 32 chars) is kept, so editors can use the OpenAI endpoint; otherwise a random one. NPU_LAB_PORT is inherited by the server.
+    let token = std::env::var("NPU_LAB_TOKEN").ok().filter(|t| t.len() >= 32).unwrap_or_else(|| rand_hex(32));
+    let code = rand_hex(32);
     let mut child: Child = Command::new(find_python(&root))
         .args(["-u", "src/serve.py"])
         .current_dir(&root)
