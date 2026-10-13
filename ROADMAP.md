@@ -77,6 +77,17 @@ Goal: the model (plus simple rules) decides *whether* to look something up, and 
 - [x] **Escalation hint** (long or multi-part questions; needs a cloud provider): when the model is unsure or the question is long/complex, suggest "ask the cloud" (a button, never automatic).
 - Check: >= 90% agreement with hand-labelled routing on the evaluation set; no regressions in answer quality. Rules: 19/24 on the classifier set (the rule words were tuned after seeing it, so treat as optimistic); the misses are general questions that default to docs, which the relevance gate keeps harmless.
 
+### 3b. Model mixer: pick the model by difficulty (idea, not built)
+Goal: answer easy questions with the fast model and send hard ones (long code edits, multi-step reasoning) to the slow high-quality one, without the user choosing each time. A deciding component, not a generating one: it only outputs a label (`fast | medium | slow`), the way the source router already outputs `none | docs | web | history`.
+- **What is measured today that bounds the design:** one model is loaded at a time (a switch is Unload + Load: 0.8B ~4 s, 2B ~7 s, 4B ~40 s on this machine), decode 15 / 8.9 / 4.1 tok/s for 0.8B / 2B / 4B, and in the long-chat test only the 4B edited code correctly while the 0.8B and 2B kept the facts but not the edits. So the mixer's real job is "does this need the 4B?", and the cost of being wrong is a 40 s model switch, which means it should decide **per conversation or per task, not per message**.
+- **Orchestrator options, cheapest first** (none of them needs a big model resident):
+  1. Rules, as `src/router.py` does today (words such as "refactor", "write a function", file names, long pasted code, a question length) -> label. Zero memory.
+  2. A small classifier on the embedding the search already computes (MiniLM, a few MB, milliseconds on the GPU or CPU): logistic regression trained on a labelled list of prompts. Needs ~100-200 labelled prompts and a held-out check; no NPU.
+  3. The loaded small model as judge (`engine.classify`, exists, off by default): measured on Qwen3-1.7B 83% alone and 92-100% after the rules, but it costs a model call per question.
+- **Suggest, do not switch silently:** like the "ask the cloud" hint, show "this looks like a code edit: switch to the 4B (about 40 s)?" with a button. Automatic switching only inside a task the user started (for example the terminal agent), and always shown.
+- **Can the machine hold two models at once?** [pending, measure first] Memory budget: VRAM ~0.9 GB (0.8B) or ~3.65 GB (4B int8) of weights plus KV, RAM 16 GB shared with the iGPU; on the NPU the roadmap says two 4-column contexts can coexist but this was never tried with two different models. The orchestrator itself (rules or MiniLM) fits anywhere; the open question is only whether a fast and a slow model can be resident together to avoid the 40 s switch. If not, keep one resident and switch on demand.
+- **Check:** on a labelled set of ~50 prompts (easy, medium, needs-the-4B) the label agrees >= 85% with the hand label, a wrong "fast" on a hard task is rarer than a wrong "slow" on an easy one (the first costs quality, the second only time), and the router adds < 50 ms.
+
 ## 4. P1: memory and context
 Goal: remember more without getting slower or running out of window.
 - [x] **Reuse the KV cache across turns** (prefix caching): today every turn re-reads the whole history. (done)
