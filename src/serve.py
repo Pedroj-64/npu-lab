@@ -8,7 +8,7 @@ Security model: binds 127.0.0.1 on a random port; every API request needs `Autho
 URL fragment, which never reaches the server); the Host header must be loopback; an Origin header is only
 accepted if it is this server's own origin; no CORS headers; only whitelisted models; folders only under $HOME.
 
-API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /chats /facts /doctor /settings   POST /routing /facts /project/apply /chats/save /chats/load /chats/delete /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
+API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /chats /facts /doctor /settings   POST /routing /facts /agent/run /project/apply /chats/save /chats/load /chats/delete /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
 """
 import gc, hmac, json, os, re, secrets, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -468,6 +468,12 @@ class H(BaseHTTPRequestHandler):
             except documents.DocError as e:
                 raise Bad(400, str(e))
             self._send(200, {"documents": documents.listing()})
+        elif self.path == "/agent/run":        # one action of the agent; anything that writes only runs with confirm=true (the page sends it after the user pressed OK)
+            import agent, search
+            root = search.rules().get("project_root", "")
+            if not root or not os.path.isdir(root):
+                raise Bad(409, "no project folder is set (Settings)")
+            self._send(200, agent.run(root, str(d.get("text", ""))[:400000], confirmed=d.get("confirm") is True, last_ok=d.get("last_ok") is not False))
         elif self.path == "/project/apply":      # writes files: only inside the chosen project, all or nothing, and only when the user pressed Apply
             import project, search
             root = search.rules().get("project_root", "")
@@ -615,9 +621,13 @@ class H(BaseHTTPRequestHandler):
                     pieces = []
                     system, root, ask = __import__("facts").as_system(__import__("qwen_npu").SYSTEM), rl.get("project_root", ""), prompt
                     if root and os.path.isdir(root):          # project mode: the map in the (cached) system prompt, the files the question names in the question
-                        import project
-                        system += project.system_block(root)
-                        ask = project.attach(prompt, root)    # `prompt` stays the plain question: it is what the history keeps
+                        if d.get("agent") is True:            # terminal agent: one action per reply (the page runs it through /agent/run)
+                            import agent
+                            system += agent.system_block(root)
+                        else:
+                            import project
+                            system += project.system_block(root)
+                            ask = project.attach(prompt, root)    # `prompt` stays the plain question: it is what the history keeps
                     for piece in S.engine.stream(ask, n, ctx or None, history, lambda name, **kw: self._line({"phase": name, **kw}), system=system):
                         pieces.append(piece)
                         self._line({"token": piece})

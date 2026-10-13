@@ -7,22 +7,9 @@ usage: python bench/agent_eval.py --check              scripted perfect agent th
 import http.client, json, os, re, shutil, subprocess, sys, tempfile, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, os.path.join(ROOT, "src")); sys.path.insert(0, os.path.join(ROOT, "bench"))
-import edit_eval as E, project, repomap
+import edit_eval as E, project, repomap, agent
 
 arg = lambda k, d: type(d)(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d
-PROTOCOL = """You are an agent that changes the files of a small Python project, one action per reply. Reply with exactly ONE action and nothing else:
-READ path                  show a file
-LIST                       list the project files
-DELETE path                delete a file
-DONE one-line summary      you are finished
-or to edit or create a file, a block (the path on the line before it, written as in the project map, for example models.py):
-models.py
-<<<<<<< SEARCH
-(lines copied exactly from the current file; leave empty to create a new file)
-=======
-(the new lines)
->>>>>>> REPLACE
-You will see the result of each action. Read a file before editing it: the lines you search for must be copied from what READ showed. Edit one place per reply. DONE is refused if your last action failed or a file no longer compiles."""
 LEGACY = '"""Old helpers nobody uses."""\n\n\ndef old():\n    return 0\n'
 TASKS = {
     1: ("In util.py make clamp raise ValueError when lo is greater than hi.",
@@ -53,68 +40,17 @@ def make_project(folder):
     open(os.path.join(folder, "legacy.py"), "w").write(LEGACY)
 
 
-def listing(root):
-    return "\n".join(sorted(os.path.relpath(os.path.join(d, f), root) for d, subs, fs in os.walk(root) for f in fs if not f.endswith(".pyc") and "__pycache__" not in d))
-
-
-def act(root, reply):
-    """Run the single action in `reply` -> (valid, text shown to the model, finished)."""
-    text = reply.split("</think>")[-1].strip()
-    if "<<<<<<< SEARCH" in text:
-        res = project.apply(root, text)
-        bad = [r for r in res if r["action"] in ("failed", "none")]
-        shown = "; ".join(f"{r['action']} {r['file']}" + (f" ({r['error']})" if r["error"] else "") for r in res)
-        if bad and bad[-1]["error"].startswith("SEARCH text found"):          # show the real file, so the next reply can copy the lines exactly
-            try:
-                shown += f"\nThe file {bad[-1]['file']} currently contains:\n" + open(project._safe(root, bad[-1]["file"], True), encoding="utf-8").read()[:3000]
-            except (ValueError, OSError, UnicodeDecodeError):
-                pass
-        return (not bad, shown, False)
-    m = re.match(r"\s*(READ|LIST|DELETE|DONE)\b[ \t]*([^\n]*)", text)
-    if not m:
-        return False, "not an action: reply with READ, LIST, DELETE, DONE or an edit block", False
-    verb, rest = m.group(1), m.group(2).strip().strip("`")
-    if verb == "DONE":
-        return True, rest, True
-    if verb == "LIST":
-        return True, listing(root), False
-    try:
-        path = project._safe(root, rest, must_exist=True)
-        if verb == "READ":
-            return True, open(path, encoding="utf-8").read()[:4000], False
-        os.remove(path)
-        return True, f"deleted {rest}", False
-    except (ValueError, OSError, UnicodeDecodeError) as e:
-        return False, f"{verb} failed: {e}", False
-
-
-def compile_error(root):
-    """First syntax error among the project's .py files, or ''."""
-    for d, subs, fs in os.walk(root):
-        for f in sorted(fs):
-            if f.endswith(".py"):
-                try:
-                    compile(open(os.path.join(d, f), encoding="utf-8").read(), f, "exec")
-                except (SyntaxError, ValueError) as e:
-                    return f"{f} does not compile: {e}"
-    return ""
-
-
 def run_task(tid, ask, steps):
     """-> (solved, valid calls, total calls, log)."""
     root = tempfile.mkdtemp(dir=os.path.expanduser("~"))
     try:
         make_project(root)
-        msg = f"{PROTOCOL}\n\nProject map:\n{repomap.build(root, 2500)}\n\nTask: {TASKS[tid][0]}"
+        msg = f"{agent.PROTOCOL}\n\nProject map:\n{repomap.build(root, 2500)}\n\nTask: {TASKS[tid][0]}"
         valid = total = 0; log = []; last_ok = True
         for _ in range(steps):
             reply = ask(msg); total += 1
-            ok, shown, done = act(root, reply)
-            if done:                                            # the model's own "I am finished" is not trusted: the harness looks first
-                why = "" if last_ok else "your last action failed; fix it first"
-                why = why or compile_error(root)
-                if why:
-                    ok, shown, done = False, f"DONE refused: {why}", False
+            r = agent.run(root, reply, confirmed=True, last_ok=last_ok)          # the product's own code, with every write auto-confirmed
+            ok, shown, done = r["ok"], r["shown"], r["done"]
             last_ok = ok
             valid += ok; log.append(("ok " if ok else "BAD") + " " + reply.split("</think>")[-1].strip().replace("\n", " | ")[:90])
             if done:
