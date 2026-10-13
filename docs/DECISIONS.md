@@ -4,6 +4,7 @@ Why things are built the way they are, and what was looked at and NOT built. Mov
 Phase 0 decisions at the top. Labels in the old text: measured = in `bench/RESULTS.md` / `bench/PERF.md`; estimate = extrapolated; proposal = does not exist.
 
 ## Decisiones del paso 2 de la Fase 2 (13 oct 2026)
+- **Cierre del paso 2 aprobado.** B2 (mejor subconjunto de vocabulario) queda como opcional en ROADMAP, con la condición de que los textos de selección sean distintos de los de evaluación. El paso 3 (int4 simulado en CPU) sigue con el criterio de `bench/INT4_SIM.md`, fijado antes de medir.
 - **`NPU_FAST_VOCAB` en Qwen3.5: opcional con aviso, no visible.** Velocidad +18 %, pero el 8.9 % de los tokens de la salida completa no están en el subconjunto y 9 de 10 respuestas cambian; puede inventar nombres propios. Queda tras la bandera (apagada, solo con reparto de GPU 0 %). La caché del subconjunto es propia por tokenizador porque `fast_vocab` solo validaba la longitud.
 - **No se reutilizan las ejecuciones de XRT (`NPU_RUN_REUSE`):** el envío ya estaba escondido bajo el DMA; ahorrarlo no acelera el paso (0.3-1.3 %). La sincronización de la salida (`bc.sync`) es necesaria: sin ella los resultados cambian.
 - **No se persigue más la reducción de costes fijos de llamada ni del pegamento de CPU:** techo medido 4-5 % y 1 % del paso.
