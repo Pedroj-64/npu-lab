@@ -35,7 +35,7 @@ def main():
     a = ap.parse_args()
     m = Q.Qwen(a.model, gpu=False)
     rng = np.random.default_rng(0)
-    print(f"## {a.model}  prefill kernels: {'yes' if m.pf else 'NO (token-by-token fallback)'}")
+    print(f"## {a.model}  prefill kernels: {'yes' if m.pf else 'NO (token-by-token fallback)'}", flush=True)
     print(f"governor={sh('cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor')} power-profile={sh('powerprofilesctl get')} "
           f"AC={sh('cat /sys/class/power_supply/A*/online')} kernel={sh('uname -r')}")
 
@@ -62,11 +62,11 @@ def main():
         next(m.stream("What is the capital of France? Answer in one sentence.", 4))
         return (time.perf_counter() - t) * 1000
 
-    print("| metric | mean ± std |\n|---|---|")
-    print(f"| decode tok/s ({a.tokens} steps) | {stat(repeat(decode, a.runs, a.warmup))} |")
+    print("| metric | mean ± std |\n|---|---|", flush=True)
+    print(f"| decode tok/s ({a.tokens} steps) | {stat(repeat(decode, a.runs, a.warmup))} |", flush=True)
     for n in map(int, a.prefill.split(",")):
-        print(f"| prefill tok/s, {n} tokens | {stat(repeat(prefill(n), a.runs, a.warmup))} |")
-    print(f"| time to first token, ms (chat prompt, ~40 tokens) | {stat(repeat(ttft, a.runs, a.warmup))} |")
+        print(f"| prefill tok/s, {n} tokens | {stat(repeat(prefill(n), a.runs, a.warmup))} |", flush=True)
+    print(f"| time to first token, ms (chat prompt, ~40 tokens) | {stat(repeat(ttft, a.runs, a.warmup))} |", flush=True)
 
 
 main()

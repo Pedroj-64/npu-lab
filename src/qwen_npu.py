@@ -28,6 +28,7 @@ def f32(raw_bf16):
     return out
 
 
+PROF = None      # --profile: dict of accumulated seconds / counts, filled by NpuLin.__call__ and Qwen.step (None = off, no behaviour change)
 REP_PENALTY = 1.1
 QBLOCK = 256               # prompt attention is done for this many queries at a time (skips the masked upper triangle)
 EXCERPT_TOKENS = 700      # token budget for retrieved excerpts in one prompt (prompt reading is ~56 tok/s)
@@ -230,32 +231,42 @@ class NpuLin:
         self.bxv = [np.frombuffer(bx.map(), dtype=np.int16) for bx in self.bx]                            # mapped: write the input in place
 
     def __call__(self, x):
-        npu, px, K0 = self.npu, self.npu.px, self.npu.K
+        npu, px, K0, P, pc = self.npu, self.npu.px, self.npu.K, PROF, time.perf_counter
+        t0 = pc()
         sx = np.abs(x).max() / XMAX or 1.0
         xq = np.round(x / sx).astype(np.int16)
         if len(xq) < self.nk * K0:
             xq = np.pad(xq, (0, self.nk * K0 - len(xq)))
-        t = time.perf_counter()
+        t = pc()
         if self.tail is not None:
             self.tail.start(x)                                   # the GPU starts its rows now and works while the NPU streams its own
         to_dev, from_dev = px.xclBOSyncDirection.XCL_BO_SYNC_BO_TO_DEVICE, px.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE
         for j, bx in enumerate(self.bx):
             self.bxv[j][:] = xq[j * K0:(j + 1) * K0]
             bx.sync(to_dev)
+        t1 = pc()
         runs = [[npu.kern(3, bi, n, bo, self.bx[j], bc) for j, (bo, bc, _) in enumerate(pieces)] for m, s, bi, n, pieces in self.chunks]   # submit all
-        out = []
+        t2 = pc()
+        out, tw = [], 0.0
         for (m, s, bi, n, pieces), rs in zip(self.chunks, runs):
             acc = None
             for r, (bo, bc, bcv) in zip(rs, pieces):
-                r.wait()
+                a = pc(); r.wait(); b = pc()
                 bc.sync(from_dev)
                 acc = bcv.astype(np.int64) if acc is None else acc + bcv        # int64: several pieces could overflow int32
+                tw += b - a
             out.append(acc * s)
-        npu.t += time.perf_counter() - t
+        npu.t += pc() - t
         y = (np.concatenate(out) if len(out) > 1 else out[0]) * sx
         if self.tail is not None:
             y = np.concatenate([y, self.tail.finish()])
-        return y if self.b is None else y + self.b
+        y = y if self.b is None else y + self.b
+        if P is not None:
+            e = P.setdefault(P.get("cur", "?"), {})
+            for k, v in (("host_prep", t1 - t0), ("submit", t2 - t1), ("wait", tw), ("post", pc() - t2 - tw),
+                         ("dispatches", sum(len(r) for r in runs)), ("calls", 1)):
+                e[k] = e.get(k, 0) + v
+        return y
 
 
 def rms(x, w, eps):
@@ -279,6 +290,23 @@ class Bf16Rows:
 
     def __getitem__(self, s):
         return f32(self.raw[s])
+
+
+def profile_table(P):
+    """Per-token breakdown (ms and % of the step) from the PROF accumulators."""
+    n, tot = P["steps"], P["step_total"] / P["steps"] * 1e3
+    rows, npu_t = [], 0.0
+    for part in ("qkv", "o", "gate_up", "down", "lm_head"):
+        e = P.get(part)
+        if e:
+            for k in ("host_prep", "submit", "wait", "post"):
+                rows.append((f"{part}: {k}", e[k] / n * 1e3)); npu_t += e[k] / n * 1e3
+    att = P.get("attention", 0) / n * 1e3
+    rows.append(("attention + qk-norm + rope (CPU, includes KV write)", att))
+    rows.append(("other CPU (rms, silu, embed, residuals)", tot - npu_t - att))
+    d = sum(P[p]["dispatches"] for p in ("qkv", "o", "gate_up", "down", "lm_head") if p in P) / n
+    out = [f"| component | ms/token | % |", "|---|---:|---:|"] + [f"| {a} | {v:.2f} | {v / tot * 100:.1f} |" for a, v in rows]
+    return "\n".join(out + [f"| **step total** | **{tot:.2f}** | 100 |", "", f"dispatches/token: {d:.0f} | NpuLin calls/token: {sum(P[p]['calls'] for p in ('qkv','o','gate_up','down','lm_head') if p in P) / n:.0f}"])
 
 
 class Qwen:
@@ -358,11 +386,15 @@ class Qwen:
 
     def step(self, tok, pos):
         H, NH, NKV, HD, FF = self.H, self.NH, self.NKV, self.HD, self.FF
+        P, pc = PROF, time.perf_counter
+        t_step = pc()
         x = self.embed[tok].copy()
         c, s = rope_tables(pos, HD, self.theta)
         rep = NH // NKV
         for i, L in enumerate(self.layers):
+            if P is not None: P["cur"] = "qkv"
             qkv = L["qkv"](rms(x, L["ln1"], self.eps))
+            if P is not None: t_att = pc()
             QD = self.QD
             q, k = qkv[:QD].reshape(NH, HD), qkv[QD:QD + NKV * HD].reshape(NKV, HD)
             if L["qn"] is not None:
@@ -376,15 +408,22 @@ class Qwen:
                 sc = (q.reshape(NKV, rep, HD) @ K.transpose(0, 2, 1)) / np.sqrt(HD)      # each KV head serves its `rep` query heads
                 sc = np.exp(sc - sc.max(-1, keepdims=True)); sc /= sc.sum(-1, keepdims=True)
                 att = (sc @ V).reshape(-1)
+            if P is not None: P["attention"] = P.get("attention", 0) + pc() - t_att; P["cur"] = "o"
             x = x + L["o"](att)
+            if P is not None: P["cur"] = "gate_up"
             gu = L["gu"](rms(x, L["ln2"], self.eps))
             g_, u_ = gu[:FF], gu[FF:]
+            if P is not None: P["cur"] = "down"
             x = x + L["down"]((g_ / (1 + np.exp(-np.clip(g_, -60, 60)))) * u_)
-        return self.lm(rms(x, self.norm, self.eps))
+        if P is not None: P["cur"] = "lm_head"
+        out = self.lm(rms(x, self.norm, self.eps))
+        if P is not None: P["step_total"] = P.get("step_total", 0) + pc() - t_step; P["steps"] = P.get("steps", 0) + 1
+        return out
 
     def prefill(self, ids, start=0, marks=()):
         """Process the tokens `ids` (which sit at positions start..) at once: matmuls on the NPU, attention in numpy.
         Positions below `start` must already be in the KV cache. Fills the cache, returns the logits of the last token."""
+        if PROF is not None: PROF["cur"] = "prefill"
         if self.g is not None:
             return self.lm(rms(self.g.prefill(ids, start), self.norm, self.eps))
         H, NH, NKV, HD, eps = self.H, self.NH, self.NKV, self.HD, self.eps
@@ -548,6 +587,7 @@ if __name__ == "__main__":
     ap.add_argument("--cpu", action="store_true")
     ap.add_argument("--shapes", action="store_true", help="print the MxK kernels to build and exit")
     ap.add_argument("--tokens", type=int, default=32)
+    ap.add_argument("--profile", action="store_true", help="print a per-token time breakdown (NPU host prep / submit / wait / post, attention, other CPU)")
     a = ap.parse_args()
     if a.shapes:
         print(" ".join(f"{m}x{k}" for m, k in shapes(json.load(open(f"{a.model}/config.json")))))
@@ -555,4 +595,11 @@ if __name__ == "__main__":
     t = time.perf_counter()
     m = Qwen(a.model, cpu=a.cpu)
     print(f"[loaded in {time.perf_counter()-t:.0f}s]", file=sys.stderr)
+    if a.profile:                                       # the first tokens (reading the prompt) are not part of the table
+        m.generate("hi", 2)
+        PROF = {}
     print(m.generate(a.prompt, a.tokens))
+    if a.profile:
+        print(profile_table(PROF), file=sys.stderr)
+        wall = m.stats["decode_s"] / max(m.stats["decode_tokens"], 1) * 1e3
+        print(f"wall decode {wall:.2f} ms/token; outside step() (sampling, penalty, detokenise): {wall - PROF['step_total'] / PROF['steps'] * 1e3:.2f} ms/token", file=sys.stderr)
