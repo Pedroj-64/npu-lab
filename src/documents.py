@@ -14,6 +14,8 @@ TEXT = (".md", ".markdown", ".txt", ".rst", ".log", ".csv", ".tsv", ".json", ".y
         ".py", ".rs", ".js", ".mjs", ".ts", ".jsx", ".tsx", ".c", ".h", ".cpp", ".hpp", ".go", ".java", ".kt", ".css", ".scss", ".sh", ".fish", ".lua", ".rb", ".php", ".nix")
 IMAGES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".gif")
 ZIPS = (".docx", ".pptx", ".xlsx", ".odt", ".ods", ".odp", ".epub")          # office / e-book formats: text lives in XML or XHTML inside a zip
+BINARY = (".exe", ".dll", ".so", ".bin", ".o", ".a", ".dmg", ".iso", ".img", ".zip", ".gz", ".xz", ".bz2", ".zst", ".7z", ".rar", ".tar", ".apk", ".jar", ".class", ".msi", ".deb", ".rpm",
+          ".mp3", ".mp4", ".mkv", ".avi", ".mov", ".wav", ".flac", ".ogg", ".sqlite", ".db", ".pyc")      # never read as text, whatever the content looks like
 EXTS = TEXT + IMAGES + ZIPS + (".pdf", ".html", ".htm", ".rtf")
 MAX_BYTES, MAX_CHUNKS, CHUNK = 30 * 1024 * 1024, 4000, 600
 MIN_COS = 0.33      # a chunk is only used when its similarity to the question reaches this (relevant hits scored 0.37-0.71, unrelated <= 0.13; see tests/test_documents.py)
@@ -96,7 +98,7 @@ def _zipped(path, ext):
 def extract(name, data, progress=lambda m: None):
     """-> [[page, text, ocr_used]]. Raises DocError for unsupported/empty/unreadable files."""
     ext = os.path.splitext(name.lower())[1]
-    if ext not in EXTS and (b"\0" in data[:8192] or not data.strip()):          # an unknown extension is fine when the content is plain text
+    if ext not in EXTS and (ext in BINARY or data[:4] in (b"MZ\x90\0", b"\x7fELF") or data[:2] == b"MZ" or b"\0" in data[:8192] or not data.strip()):          # an unknown extension is fine when the content is plain text
         raise DocError(f"unsupported file type {ext or '(none)'}: not plain text. Supported: pdf, docx, pptx, xlsx, odt, epub, rtf, html, images (OCR), and any text/code file")
     if ext not in EXTS:
         ext = ".txt"

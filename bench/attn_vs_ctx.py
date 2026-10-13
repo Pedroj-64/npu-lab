@@ -1,6 +1,8 @@
 """Decode cost per token as the context grows (NPU only): where does the CPU attention start to hurt?
 usage: .venv/bin/python bench/attn_vs_ctx.py [--model models/qwen3s] [--ctx 16,256,1024,2048,3500]"""
 import argparse, os, sys, time
+for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):   # same as production (src/qwen_npu.py): must be set BEFORE numpy is imported
+    os.environ.setdefault(v, "1")
 os.environ["NPU_GPU"] = "0"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT); sys.path.insert(0, os.path.join(ROOT, "src"))

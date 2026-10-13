@@ -381,7 +381,7 @@ class Qwen:
             if max_ctx > 4096:
                 max_ctx = self.max_ctx = 4096
                 self.ctx_limited = True
-            self.kc = np.zeros((self.NL, max_ctx, self.NKV, self.HD), np.float32)
+            self.kc = np.zeros((self.NL, self.NKV, max_ctx, self.HD), np.float32)      # head-major: each KV head's keys are one contiguous block (BLAS-friendly)
             self.vc = np.zeros_like(self.kc)
 
     def step(self, tok, pos):
@@ -403,11 +403,13 @@ class Qwen:
             if self.g is not None:                         # attention + KV cache on the GPU
                 att = self.g.attn(i, q, k, v, pos)
             else:
-                self.kc[i, pos], self.vc[i, pos] = k, v
-                K, V = self.kc[i, :pos + 1].transpose(1, 0, 2), self.vc[i, :pos + 1].transpose(1, 0, 2)   # views (NKV, T, HD): no copy
-                sc = (q.reshape(NKV, rep, HD) @ K.transpose(0, 2, 1)) / np.sqrt(HD)      # each KV head serves its `rep` query heads
-                sc = np.exp(sc - sc.max(-1, keepdims=True)); sc /= sc.sum(-1, keepdims=True)
-                att = (sc @ V).reshape(-1)
+                self.kc[i, :, pos], self.vc[i, :, pos] = k, v
+                qf, att = q.astype(np.float32).reshape(NKV, rep, HD), np.empty((NKV, rep, HD), np.float32)   # q arrives as float64 (the NPU output): against the float32 cache that would copy the whole cache to float64 every layer
+                for h in range(NKV):                       # each KV head serves its `rep` query heads: plain 2-D matmuls on contiguous blocks
+                    sc = (qf[h] @ self.kc[i, h, :pos + 1].T) * HD ** -0.5
+                    sc = np.exp(sc - sc.max(-1, keepdims=True)); sc /= sc.sum(-1, keepdims=True)
+                    att[h] = sc @ self.vc[i, h, :pos + 1]
+                att = att.reshape(-1)
             if P is not None: P["attention"] = P.get("attention", 0) + pc() - t_att; P["cur"] = "o"
             x = x + L["o"](att)
             if P is not None: P["cur"] = "gate_up"
@@ -446,11 +448,11 @@ class Qwen:
             if L["qn"] is not None:
                 q, k = rmsb(q, L["qn"]), rmsb(k, L["kn"])
             q, k = q * cos + rot(q) * sin, k * cos + rot(k) * sin
-            self.kc[i, start:S], self.vc[i, start:S] = k, v
+            self.kc[i, :, start:S], self.vc[i, :, start:S] = k.transpose(1, 0, 2), v.transpose(1, 0, 2)
             att = np.empty((T, NKV, rep, HD), np.float32)
             for a in range(0, T, QBLOCK):                    # causal: a block of queries never looks past its own last token
                 e, Sb = min(a + QBLOCK, T), start + min(a + QBLOCK, T)
-                Kt, V = self.kc[i, :Sb].transpose(1, 2, 0), self.vc[i, :Sb].transpose(1, 0, 2)     # (NKV, HD, Sb), (NKV, Sb, HD): views
+                Kt, V = self.kc[i, :, :Sb].transpose(0, 2, 1), self.vc[i, :, :Sb]     # (NKV, HD, Sb), (NKV, Sb, HD): views
                 qh = q[a:e].reshape(e - a, NKV, rep, HD).transpose(1, 2, 0, 3).reshape(NKV, rep * (e - a), HD)   # a KV head serves its `rep` query heads
                 sc = (qh @ Kt / np.sqrt(HD)).reshape(NKV, rep, e - a, Sb) + mask[a:e, :Sb]
                 sc = np.exp(sc - sc.max(-1, keepdims=True)); sc /= sc.sum(-1, keepdims=True)

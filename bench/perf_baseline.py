@@ -2,6 +2,8 @@
 usage: .venv/bin/python bench/perf_baseline.py --model models/qwen3s [--runs 5 --warmup 2 --tokens 32]
 Prints a markdown row block (mean +- std over --runs, after --warmup discarded runs) plus the machine state."""
 import argparse, os, subprocess, sys, time
+for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):   # same as production (src/qwen_npu.py): must be set BEFORE numpy is imported
+    os.environ.setdefault(v, "1")
 os.environ["NPU_GPU"] = "0"                      # NPU only: no GPU attention / prefill, so the numbers are the NPU's own
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
