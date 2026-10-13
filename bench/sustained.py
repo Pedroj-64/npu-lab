@@ -11,6 +11,9 @@ hw = {open(d + "/name").read().strip(): d for d in glob.glob("/sys/class/hwmon/h
 rd = lambda p: int(open(p).read())
 apu = hw["amdgpu"] + "/power1_input"; cput = hw["k10temp"] + "/temp1_input"
 fans = glob.glob(hw["hp"] + "/fan*_input") if "hp" in hw else []
+igpu_t = hw["amdgpu"] + "/temp1_input"
+prof = lambda: open("/sys/firmware/acpi/platform_profile").read().strip()
+assert prof() == "performance", "platform_profile must be performance for this measurement: " + prof()
 Q = "temperature.gpu,clocks.sm,clocks.mem,power.draw.instant,clocks_throttle_reasons.active,pstate"
 rows, run = [], True
 
@@ -20,8 +23,9 @@ def sample():
     for line in p.stdout:
         if not run: break
         t, sm, mem, w, thr, ps = [x.strip() for x in line.split(",")]
+        fs = [rd(f) for f in glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq")]
         rows.append(dict(t=time.perf_counter(), gpu_c=float(t), sm=float(sm), mem=float(mem), gpu_w=float(w), thr=int(thr, 16), pstate=ps, apu_w=rd(apu) / 1e6, cpu_c=rd(cput) / 1000,
-                         fan=[rd(f) for f in fans], freq=st.mean(rd(f) for f in glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq")) / 1e3))
+                         fan=[rd(f) for f in fans], freq=st.mean(fs) / 1e3, fmin=min(fs) / 1e3, fmax=max(fs) / 1e3, igpu_c=rd(igpu_t) / 1000, prof=prof()))
     p.terminate()
 
 
@@ -42,11 +46,11 @@ res = []
 for (s, e, n) in wins:
     r = [x for x in rows if s <= x["t"] <= e]
     res.append(dict(t=round(s - t0), tok_s=n / (e - s), total_w=st.mean(x["apu_w"] + x["gpu_w"] for x in r), gpu_w=st.mean(x["gpu_w"] for x in r), gpu_c=max(x["gpu_c"] for x in r), sm=st.mean(x["sm"] for x in r),
-                    mem=min(x["mem"] for x in r), thr=sorted({hex(x["thr"]) for x in r}), cpu_c=max(x["cpu_c"] for x in r), freq=st.mean(x["freq"] for x in r), fan=[max(x["fan"][i] for x in r) for i in range(len(fans))]))
+                    mem=min(x["mem"] for x in r), thr=sorted({hex(x["thr"]) for x in r}), cpu_c=max(x["cpu_c"] for x in r), freq=st.mean(x["freq"] for x in r), fmin=min(x["fmin"] for x in r), fmax=max(x["fmax"] for x in r), igpu_c=max(x["igpu_c"] for x in r), prof=sorted({x["prof"] for x in r}), fan=[max(x["fan"][i] for x in r) for i in range(len(fans))]))
 print(f"model {os.path.basename(a.model)} share {a.share:.0%}, {a.seconds:.0f} s")
-print("| t s | tok/s | total W | GPU W | GPU max C | SM MHz | mem MHz min | throttle | CPU max C | CPU MHz | fan |\n|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---|")
+print("| t s | tok/s | total W | GPU W | GPU max C | SM MHz | mem MHz min | throttle | CPU max C | CPU MHz mean (min core) | iGPU C | profile | fan |\n|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|---|---|")
 for r in res:
-    print(f"| {r['t']} | {r['tok_s']:.2f} | {r['total_w']:.1f} | {r['gpu_w']:.1f} | {r['gpu_c']:.0f} | {r['sm']:.0f} | {r['mem']:.0f} | {','.join(r['thr'])} | {r['cpu_c']:.0f} | {r['freq']:.0f} | {r['fan']} |")
+    print(f"| {r['t']} | {r['tok_s']:.2f} | {r['total_w']:.1f} | {r['gpu_w']:.1f} | {r['gpu_c']:.0f} | {r['sm']:.0f} | {r['mem']:.0f} | {','.join(r['thr'])} | {r['cpu_c']:.0f} | {r['freq']:.0f} ({r['fmin']:.0f}) | {r['igpu_c']:.0f} | {','.join(r['prof'])} | {r['fan']} |")
 k = max(1, len(res) // 5); f, l = res[:k], res[-k:]
 print(f"first {k} windows vs last {k}: tok/s {st.mean(x['tok_s'] for x in f):.2f} -> {st.mean(x['tok_s'] for x in l):.2f} ({(st.mean(x['tok_s'] for x in l) / st.mean(x['tok_s'] for x in f) - 1) * 100:+.1f} %); total W {st.mean(x['total_w'] for x in f):.1f} -> {st.mean(x['total_w'] for x in l):.1f}; max GPU C {max(x['gpu_c'] for x in res):.0f}; max CPU C {max(x['cpu_c'] for x in res):.0f}")
 if a.json:
