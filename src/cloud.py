@@ -4,7 +4,7 @@ Kinds: "openai" (any OpenAI-compatible /chat/completions: NVIDIA NIM, OpenRouter
 This is opt-in per message. What is sent: the conversation and, only if you tick it, the docs/web excerpts.
 Never your indexed files. Keys never appear in errors or logs.
 """
-import json, urllib.error, urllib.parse, urllib.request
+import json, re, urllib.error, urllib.parse, urllib.request
 import web
 
 GEMINI = "https://generativelanguage.googleapis.com/v1beta"
@@ -94,4 +94,5 @@ def list_models(p):
     base = (p.get("base_url") or GEMINI).rstrip("/")
     resp = _open(base + "/models?pageSize=200", None, {"x-goog-api-key": key}, key, method="GET")
     return sorted(m["name"].split("/", 1)[-1] for m in json.load(resp).get("models", [])
-                  if "generateContent" in m.get("supportedGenerationMethods", []))
+                  if "generateContent" in m.get("supportedGenerationMethods", [])
+                  and not re.search(r"tts|image|embedding|computer-use|deep-research|antigravity|live|audio|robotics", m["name"]))   # chat models only

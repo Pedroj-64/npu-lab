@@ -6,17 +6,19 @@ run through XRT and `pyxrt`. No vendor LLM stack supports this generation on Lin
 so everything here is built from the low-level pieces.
 
 ## What works
+- **Local LLM chat with the NPU generating every token** (Qwen3 / Qwen3.5, 0.6B to 4B), optional GPU assistance for long context, documents,
+  local docs and web search: see Quick start and Modes below.
 - `bench/matmul_npu.py`: int16 matmul on the NPU vs numpy on the CPU (up to ~1.4 TOPS at 1024^3).
 - `src/minilm.py` + `src/npu_linear.py`: all-MiniLM-L6-v2 sentence embeddings in numpy,
   with every dense layer offloaded to the NPU. Embeddings match the CPU ones (cosine >= 0.996).
 - Numbers and how to reproduce them: [`bench/RESULTS.md`](bench/RESULTS.md).
 
 ## Why local documentation (frozen knowledge)
-A small model's knowledge stops at its training date (Qwen2.5: around 2023-24) and it confidently invents commands.
+A small model's knowledge stops at its training date (a year or more ago) and it confidently invents commands.
 `python src/docs.py --device gpu build` indexes the man pages and `tldr` pages installed on **your** machine (and the
 Arch wiki if `arch-wiki-docs` is installed); in the Chat tab, "use local documentation" retrieves the best excerpts for
 your question (query embedding runs on one CPU core, ~0.1 s), hands them to the model and shows the sources.
-Example (Qwen2.5-1.5B, "how do I install an AUR package with paru"): without docs it invents that AUR is the
+Example (a 1.5B model, "how do I install an AUR package with paru"): without docs it invents that AUR is the
 "Arch Linux App Repository" and that `paru` comes from `sudo pacman -S paru`; with docs it answers `paru -S package`.
 Run `tldr --update` first (tealdeer or tldr client). Index build: ~1.5 min with a GPU (CPU part: rendering man pages).
 It is a mitigation, not magic: a 1.5B model can still misread a correct page, so read the cited source and run commands yourself.
@@ -49,23 +51,43 @@ Hardware tested: AMD Ryzen 5 8645HS (XDNA1 / Hawk Point). XDNA2 (Ryzen AI 300) i
 cd launcher && cargo build --release && cd ..      # one small binary (Rust)
 ./launcher/target/release/npu                     # starts the local server and opens your browser
 ```
-The page (`http://127.0.0.1:<random port>/`) walks you through a **system check** (NPU, XRT, memory limit, kernels,
-models, with the exact fix for anything missing), lets you pick the **resource profile** (NPU only / assisted),
-**load one mode at a time** (LLM chat or semantic search; switching frees the NPU), chat, search, run the index
-and choose which folders may be read. Press Ctrl+C in the terminal to stop it.
+The page (`http://127.0.0.1:<random port>/`) has four tabs:
+- **Setup**: a **system check** (NPU, XRT, memory limit, kernels, models, tools, with the exact fix for anything missing), the **resource
+  profile** (NPU only / Assisted) and its limits (GPU memory the model may use, context window, conversation compaction, GPU share, document cache).
+- **Chat**: pick a model and press **Load** (one at a time; Unload frees the NPU), then chat. Drag files onto the page (PDF, Markdown, text,
+  HTML, DOCX, images with OCR) to ask about them; sources are shown for every answer: *local docs* (man/tldr/Arch wiki), *web search*,
+  *my documents*, each Auto / On / Off, and a line says what was used and why with a one-click override.
+- **Search**: semantic search over the folders you allow, with the index controls.
+- **Settings**: web search provider, the words that route a question (Auto mode), and **cloud assist** (pick NVIDIA / OpenRouter /
+  OpenAI / Gemini / Ollama, paste a key, Connect).
+Press Ctrl+C in the terminal to stop it.
 
 Security: the server listens on `127.0.0.1` only and every API call needs a random token; the link the launcher
 prints carries a **one-time code** (it works once, then it is useless); foreign `Host`/`Origin` headers are refused;
 the API never accepts file paths for models and only lets you read folders inside your home.
-`python tests/test_server.py` checks all of this plus a real NPU round trip.
+`python tests/test_server.py` checks all of this plus real NPU and GPU round trips (loads each profile, a Qwen3.5 model, compaction);
+`python tests/eval_routing.py` checks the routing rules offline.
 
 ## Modes
 The NPU is the center of the project; GPU/CPU are optional helpers, never required.
-- **LLM chat**: `python src/qwen_npu.py "prompt"` runs Qwen2.5-Instruct with every dense layer on the NPU
-  (int8 weights): 0.5B ~15.7 tok/s, 1.5B (`--model models/qwen15`) ~6.3 tok/s, ~0.3 CPU cores.
-  The assistant answers in Spanish by default. Kernels for a model: `python src/qwen_npu.py --model DIR --shapes`
-  lists them, `scripts/build_matvec.py --shared ...` builds them; `scripts/build_prefill.py DIR` builds the
-  prompt-reading kernels (bf16 matmuls, ~170 tok/s on the 0.5B, ~56 tok/s on the 1.5B instead of reading token by token).
+- **LLM chat**: the NPU generates every token (int8 weights, one shared 4-column kernel); all models are Qwen3 / Qwen3.5 (Apache-2.0),
+  downloaded separately into `models/` (see the table). The assistant answers in Spanish by default.
+
+  | Role | Model (folder) | Needs | Decode on a Ryzen 5 8645HS + RTX 3050 6 GB |
+  |---|---|---|---|
+  | fast | Qwen3.5-0.8B (`models/qwen35_08b`) | Assisted | ~15 tok/s |
+  | medium | Qwen3.5-2B (`models/qwen35_2b`) | Assisted | ~9 tok/s; **~13.8 tok/s with a 50% GPU share** |
+  | slow, high quality | Qwen3.5-4B (`models/qwen35_4b`) | Assisted | ~4.2 tok/s |
+  | NPU only | Qwen3-1.7B (`models/qwen3`), Qwen3-0.6B (`models/qwen3s`) | nothing | ~9 / ~19 tok/s, 4k context |
+
+  One model is loaded at a time (Unload, then Load). **Profiles:** *NPU only* never touches the GPU (Qwen3 models, 4096 tokens of
+  context, prompts read by the NPU at ~90 tok/s). *Assisted* lets the GPU read prompts (1000-1800 tok/s), keep the KV cache / DeltaNet
+  state and run attention, which gives **long context** (default window 80k tokens, up to 262k; Qwen3.5-2B reads 100k tokens in ~90 s and
+  keeps ~8 tok/s), and optionally compute a share (0/25/50%) of every weight matrix next to the NPU. Limits are set in the Setup tab:
+  GPU memory the model may use (default 4 GB), context window, when to compact the conversation (the model summarises old turns), GPU share.
+  Kernels for a model: `python src/qwen35_npu.py --model DIR --shapes [--share 0.5]` lists them and
+  `python scripts/build_matvec.py --shared4 ...` builds them (the System check prints the exact command). `src/qwen_npu.py` is the Qwen3
+  (dense) engine, `src/qwen35_npu.py` the hybrid Qwen3.5 one (Gated DeltaNet on the GPU).
 - **Semantic file search**: `python src/search.py index` then `python src/search.py search "query"`.
   Embeddings run on the NPU. What may be read is controlled by `~/.config/npu-lab/rules.json`
   (allowed roots/extensions, denied folders and file names, secret-looking chunks are skipped);
@@ -81,14 +103,36 @@ The NPU is the center of the project; GPU/CPU are optional helpers, never requir
 3. Check the device: `xrt-smi examine` should list `RyzenAI-npu1`.
 4. Python venv with the toolchain:
    `uv venv .venv && uv pip install mlir_aie llvm-aie numpy scipy tokenizers safetensors -f https://github.com/Xilinx/mlir-aie/releases/expanded_assets/v1.4.4 -f https://github.com/Xilinx/llvm-aie/releases/expanded_assets/nightly`
-   and link the system `pyxrt` into it (`.pth` file pointing at the XRT python dir).
+   and link the system `pyxrt` into it (`.pth` file pointing at the XRT python dir). For the Assisted profile also install PyTorch with CUDA
+   (`uv pip install torch`) and, for the Qwen3.5 correctness check only, `transformers`. Documents: `sudo pacman -S poppler` (PDF text) and
+   optionally `tesseract tesseract-data-spa tesseract-data-eng` (OCR of scans and images).
 5. Clone mlir-aie into `third_party/` and build the `whole_array` matmul kernels
    (see the reproduce section in `bench/RESULTS.md`).
-6. Download `sentence-transformers/all-MiniLM-L6-v2` into `models/minilm/`.
+6. Download the models you want into `models/` (any of them; the System check lists what is missing):
+   ```
+   python - <<'PY'
+   from huggingface_hub import snapshot_download
+   for repo, d in [("Qwen/Qwen3.5-2B", "models/qwen35_2b"),      # medium (Assisted)
+                   ("Qwen/Qwen3.5-0.8B", "models/qwen35_08b"),   # fast (Assisted)
+                   ("Qwen/Qwen3.5-4B", "models/qwen35_4b"),      # slow, high quality (Assisted)
+                   ("Qwen/Qwen3-1.7B", "models/qwen3"),          # NPU only
+                   ("Qwen/Qwen3-0.6B", "models/qwen3s"),         # NPU only, fast
+                   ("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", "models/multi")]:
+       snapshot_download(repo, local_dir=d, allow_patterns=["*.json", "*.safetensors", "merges.txt", "vocab.json", "*.jinja"])
+   PY
+   ```
+7. Build the NPU kernels for each model you downloaded (a minute or two per model; add `--share 0.5` for a 50% GPU share):
+   ```
+   export PEANO_INSTALL_DIR=$PWD/.venv/lib/python3.*/site-packages/llvm-aie PATH=$PWD/.venv/bin:$PATH
+   python scripts/build_matvec.py --shared4 $(python src/qwen35_npu.py --model models/qwen35_2b --shapes)
+   python scripts/build_prefill.py models/qwen3        # only the NPU-only Qwen3 models read prompts with NPU kernels
+   ```
+8. Optional: local documentation index (`python src/docs.py --device gpu build`, after `tldr --update`).
 
-## Status / ideas
-- Next: int8 matvec kernel (half the weight bytes), more cores per column, a 1.5B model,
-  and a small launcher to pick the mode (LLM / search) and a resource profile (NPU-only / assisted).
+## Status
+Usable day to day on the tested machine (Ryzen 5 8645HS + RTX 3050 6 GB, Linux): chat with five models, long context (80k tokens by default), documents,
+local docs, web search, optional cloud assist. Known limits: Linux only, XDNA1 only, the Assisted profile needs an NVIDIA GPU with CUDA,
+OCR needs `tesseract`, kernels must be built per model (and per GPU share) on your machine.
 
 See [`ROADMAP.md`](ROADMAP.md) for what is next (per-question routing for docs/web, better memory, evaluation).
 
@@ -96,4 +140,6 @@ License: MIT.
 
 ## Credits
 `src/kernels/matvec.py` is adapted from the [mlir-aie](https://github.com/Xilinx/mlir-aie) matrix_vector example
-(Apache-2.0 with LLVM exception; original header kept). Models: Qwen2.5-0.5B-Instruct (Qwen), paraphrase-multilingual-MiniLM-L12-v2 and all-MiniLM-L6-v2 (sentence-transformers) are downloaded separately and not redistributed here.
+(Apache-2.0 with LLVM exception; original header kept). Models: Qwen3 and Qwen3.5 (Qwen team, Apache-2.0), paraphrase-multilingual-MiniLM-L12-v2 and all-MiniLM-L6-v2 (sentence-transformers) are downloaded separately and not redistributed here.
+
+The Gated DeltaNet chunked scan in `src/gpu_qwen35.py` is adapted from Hugging Face transformers (`modeling_qwen3_5.py`, Apache-2.0).

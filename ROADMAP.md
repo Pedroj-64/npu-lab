@@ -3,6 +3,32 @@
 What is built, what is wrong, and what comes next, ordered by impact. Every item has a way to check it worked.
 Status: `[x]` done, `[ ]` planned.
 
+## Plan: NPU decodes, the RTX 3050 reads and remembers (agreed Oct 2026)
+Measured on this machine: 5.8 GB of the 6 GB VRAM are free (the desktop runs on the iGPU), fp16 matmul 11.5 TFLOPS (~10-20x the NPU's 93 tok/s prompt reading), a CPU->GPU->CPU round trip of a decode-sized vector costs ~20 us, host->GPU copies run at 12.5 GB/s, and GPU attention for one decode token at 16k context costs ~15 ms for all layers (the numpy path scales to hundreds of ms).
+Roles: **NPU = decode matvec of every layer (the weight stream, the bottleneck)**; **GPU = prompt reading (prefill), KV cache and attention, linear-attention state, embeddings**; CPU = glue.
+Target: three usable models: **fast** (Qwen3-0.6B, then Qwen3.5-0.8B), **medium** (Qwen3-1.7B, then Qwen3.5-2B), **slow and high quality** (Qwen3.5-4B).
+- [x] **Phase 1 (done, profile "Assisted" only; "NPU only" keeps the old all-NPU path)**: `src/gpu_qwen.py`. Qwen3-1.7B measured: prompt reading **93 -> 1333 tok/s (512 tokens), 2582 (2048), 2467 (6000)**; decode **110 / 113 / 115 ms per token at 0 / 1500 / 6000 tokens of context** (was 150 / 187 / ~290 with CPU attention); max context 8192 with a bf16 KV cache in VRAM (VRAM use 4.4 GB: 3.4 GB weights for prompt reading + KV); RAM free +4 GB (no bf16 prompt copy, no CPU KV). Logits match the NPU prompt reader (cosine 0.99986). 5 of 8 benchmark answers identical, 3 diverge mid-text from bf16 rounding and stay correct. The NPU still generates every token (94 of 110 ms per token). Server test passes in both profiles (`tests/test_server.py`).
+- [x] **GPU memory cap and context window are settings** (Setup tab, Assisted profile; `llm_vram_gb` default 5.5, `context_tokens` default 8192; applied at the next Load). The window is cut to what fits after the weights (`GpuCore` computes it) and the model state shows the real size; if even 2048 tokens do not fit the model loads NPU-only. Measured with Qwen3-0.6B: asking for 120k in 5.5 GB gives 32.9k. NPU-only keeps 4096 (float32 KV in RAM). Dense Qwen3 costs 114 KB of KV per token (16k = 1.9 GB bf16), so 60k-120k only becomes realistic with Qwen3.5 (~12 KB per token: 120k = 1.5 GB) or an int8 KV cache plus streamed weights.
+- [x] **Model line-up (one loaded at a time, switched with Unload/Load as today):** fast = Qwen3-0.6B (-> Qwen3.5-0.8B), medium = Qwen3-1.7B (-> Qwen3.5-2B, the long-context one), slow and high quality = Qwen3-4B (already supported by the engine except that its 8 GB of bf16 weights need layer streaming for GPU prompt reading) (-> Qwen3.5-4B). **Done:** fast Qwen3.5-0.8B, medium Qwen3.5-2B, slow Qwen3.5-4B (Assisted); Qwen3-1.7B / 0.6B stay for NPU only.
+- [x] **Phase 3 for the 2B (done): Qwen3.5-2B runs with the NPU generating and the GPU doing DeltaNet, attention and prompt reading** (`src/gpu_qwen35.py`, `src/qwen35_npu.py`). Checked against the Hugging Face reference: logits cosine **0.9999**, same top-5; stepwise decode vs prefill cosine 0.99988; snapshot/rewind of the recurrent state works. Measured (4 GB VRAM limit): context window **58.8k tokens**, load 32 s; prompt reading **1700 tok/s at 6k, 1800 at 17k, 1500 at 41k**; decode **8.0 / 8.2 / 7.9 tok/s at 6k / 17k / 41k tokens**; a hidden key found in the text at 5.8k, 17k and 41k tokens. With a 5.5 GB limit and a 130k window: **101k tokens read in 91 s (1112 tok/s), decode 7.8 tok/s, key found** (VRAM at the edge; the window formula now reserves attention scratch that grows with the window). The 8-prompt benchmark: 8.07 tok/s, coherent answers (knows paru is an AUR helper, which Qwen3-1.7B did not).
+- [x] **Phase 3, Qwen3.5 port** (Gated DeltaNet + gated attention + partial RoPE; the recurrence and its state live on the GPU in torch, which is far easier than numpy): 0.8B, 2B, then 4B. **Done for 0.8B, 2B and 4B.**
+- [x] **Phase 4, the 4B profile**: weights that do not fit in VRAM are streamed layer by layer from RAM at 12.5 GB/s for prefill (4.2 GB int8 = ~0.35 s per pass). **Done differently:** the GPU keeps the 4B in int8 (with the same quantisation as the NPU), no layer streaming needed.
+- [~] **Phase 5, set defaults**: the fast / medium / slow selector is done; still open: router classifier on by default (Qwen3.5 as judge, re-measure) and the reranker on the GPU.
+
+## Optimization backlog (Oct 2026): squeezing NPU, GPU and CPU
+Where one decoded token goes today (Qwen3.5-2B, ~125 ms): ~90 ms the NPU streaming 1.9 GB of int8 weights (~21 GB/s), ~170 NPU calls per token (~120 us fixed each, ~20 ms), GPU conv/recurrence/attention steps with a ~20 us round trip per layer, numpy glue on the CPU (norms, SiLU, concatenations). The NPU kernel is within ~1.5x of its int16 multiply-accumulate floor, so more bytes per second will not come from the NPU alone.
+Ranked by expected gain per effort (estimates, not measurements, except where marked):
+1. [x] **Profile one token (done, Qwen3.5-2B, 112 ms)**: NPU calls 95 ms (85%; `pyxrt.wait` 86 ms = the weight stream, host Python 8 ms), GPU DeltaNet 9.3 ms, GPU attention 3.8 ms, CPU glue 3.5 ms. Mapped (zero-copy) NPU buffers saved ~1 ms: the NPU is bandwidth-bound, not host-bound.
+2. [x] **GPU share of the decode matvecs (done; setting 0 / 25 / 50 %, default 0 = NPU only; Qwen3.5 only).** Every layer matrix and the output head are split by rows: the NPU runs the first rows, the GPU the last rows from the weights it already holds for prompt reading, on a side stream while the NPU streams (each GPU part is one CUDA-graph launch). Results are the same tokens (logits cosine 0.9999). Qwen3.5-2B, ms per token / tok/s: **0%: 112 / 8.9, 25%: 96 / 10.4, 50%: 73 / 13.8 (+55%)**. NPU kernels with fewer rows must be built per share level (`scripts/build_matvec.py --shared4 $(python src/qwen35_npu.py --model DIR --shapes --share 0.5)`; the System check prints the command). Original idea text: The GPU already holds every layer weight in VRAM for prompt reading; its memory moves ~190 GB/s (9x the NPU). Splitting each matrix by rows so both stream at the same time gives ~+25% decode at a 30% GPU share and ~2x at 60%. The honest consequence: the pure-speed optimum is GPU-heavy; the NPU stays central for power and for keeping the GPU free. Default stays 0%, the user picks the share.
+3. [ ] **Smaller output head** (`NPU_FAST_VOCAB`): the 248k-token head is 27% of the bytes of the 2B (509 MB per token); a 40k subset gives ~+20% decode; make it default only after the quality check is repeated on Qwen3.5.
+4. [x] **CUDA graphs for the GPU steps (DeltaNet done: 9.3 -> 3.9 ms per token; attention steps still eager because the key length changes every token)**; open: **fused kernels** (~15 small launches per DeltaNet layer today): ~-10 ms per token. Also try `flash-linear-attention` kernels for the DeltaNet prompt scan (the Python chunk loop dominates long prompts).
+5. [~] **Cut the fixed cost of NPU calls and CPU glue** (mapped buffers done; in-place numpy for norm/SiLU/residual still open): preallocated buffers and mapped (zero-copy) BOs, fewer syncs, in-place numpy for norm/SiLU/residual; ~-8 to -12 ms per token.
+6. [x] **Persist document state to disk**: after reading a long document, save the KV cache of the full-attention layers plus the DeltaNet snapshots keyed by content hash (100k tokens = ~1.2 GB for the 2B). Re-opening it costs about a second instead of 90 s. The biggest win for the large-documents/code use case. **Done (`src/statecache.py`, setting "Document cache on disk", default 8 GB, least-recently-used eviction):** a 28,977-token document took 17.9 s to read the first time and 1.1 s from the cache in a freshly loaded engine (16x), ~360 MB per cached position; a second question about the same document in the same session read in 0.7 s.
+7. [ ] **Speculative decoding with the model's own MTP head** (Qwen3.5 ships one extra layer for this): the batched-vector kernel measured NV=2 at 1.25x the cost of one token, so ~1.3-1.4x with typical acceptance. Medium effort.
+8. [ ] **Batching independent requests** (document map-reduce, conversation compaction, router): the 4-vector kernel measured 1.7x cheaper per vector, so summarising several chunks at once is nearly free throughput (not lower latency for one chat).
+9. [ ] **KV cache in fp8/int8** for the full-attention layers (doubles the window per GB) and attention sinks / token eviction when even that is not enough.
+10. [ ] Prompt reading is already 1100-1800 tok/s; progress reporting and chunked cancel for very long prompts.
+
 ## 0. Where we are
 - [x] NPU kernels: int8 matvec (decode), bf16 matmul (prompt reading), shared contexts, Qwen2.5 0.5B/1.5B (see `bench/RESULTS.md`).
 - [x] Semantic file search, local docs index (man/tldr/Arch wiki), web search, optional cloud assist, web UI + Rust launcher.
@@ -18,38 +44,45 @@ Taken from real use of the chat with "local docs" and "web search" both ticked.
 | same question | also cited `man:amidi`, `tldr:es/cal`, `man:eventlogadm` | the top-4 excerpts are always injected, **even when none is relevant** |
 | "what did we talk about in this chat" | searched the web for "chat", answered about ChatGPT | a question about the conversation must be answered from the history, with no retrieval |
 | any | `web:duckduckgo.com` listed as a source | search-engine pages are not filtered out of the results |
+| "how to make homemade soap, ingredients only" (Spanish) | degenerate loop: repeated "Aceite de coco / oliva / girasol / almendras: 100 ml" until the token limit, never closing the list | no repetition penalty / loop guard in decoding; small model on a list-style answer. TODO: add `repetition_penalty` (~1.1) or no-repeat n-gram, and stop generation when the same line repeats 3+ times; add this prompt to the eval set (section 6) |
 | any | code fences sometimes show on one line | fences that start mid-line are not recognised by the Markdown renderer |
 
 Root problem: **retrieval is switched on by checkboxes, not decided per question**, and nothing checks whether what was retrieved is any good.
 
 ## 2. P0: decide per question, and drop junk (small, big payoff)
 Goal: the right source for each question, and no source at all when nothing relevant exists.
-- [ ] **Auto mode** for docs and web (Auto / On / Off per source, default Auto). The checkboxes stop being "always inject".
-- [ ] **Relevance gate** for docs: inject an excerpt only if its score passes a threshold or the command name appears in the question as a whole word; otherwise say nothing instead of guessing. Threshold is a setting.
-- [ ] **History-only questions** ("what did we talk about", "summarise the above", "and in Python?", "repeat that") skip retrieval entirely.
-- [ ] **Filter web results**: drop search-engine and aggregator pages, duplicates by domain, results with no readable text.
-- [ ] **Query rewriting**: build a standalone search query from the question plus recent turns instead of sending the raw prompt.
-- [ ] Tolerant Markdown fences (``` starting mid-line, missing newline before the closing fence).
+- [x] **Auto mode** for docs and web (Auto / On / Off per source, default Auto). The checkboxes stop being "always inject".
+- [x] **Relevance gate** for docs: inject an excerpt only if its score passes a threshold or the command name appears in the question as a whole word; otherwise say nothing instead of guessing. Threshold is a setting.
+- [x] **History-only questions** ("what did we talk about", "summarise the above", "and in Python?", "repeat that") skip retrieval entirely.
+- [x] **Filter web results**: drop search-engine and aggregator pages, duplicates by domain, results with no readable text.
+- [x] **Query rewriting**: build a standalone search query from the question plus recent turns instead of sending the raw prompt.
+- [x] Tolerant Markdown fences (``` starting mid-line, missing newline before the closing fence).
 - Check: the field-report table becomes a regression test (section 6) and every row passes.
 
 ## 3. P1: a router with criteria you control
 Goal: the model (plus simple rules) decides *whether* to look something up, and you can edit the criteria.
-- [ ] **Rule layer first** (fast, predictable), driven by a user-editable file (`~/.config/npu-lab/routing.json`, also editable in Settings):
+- [x] **Rule layer first** (fast, predictable), driven by a user-editable file (`~/.config/npu-lab/routing.json`, also editable in Settings):
   - time-sensitive words (today, yesterday, latest, price, version, news, years >= current year, "who is the current...") -> **web**
   - the question names an installed command/tool, or asks "how do I <do X> in the terminal" -> **docs**
   - references to the conversation ("above", "you said", "we talked") -> **history**
   - general programming / concepts -> **none** (answer directly; web optional)
-- [ ] **Model classifier second** for what rules cannot tell: the local model gets the criteria and a few examples and answers one word
+- [x] **Model classifier second** (built; **with the 3B it reaches 92%** as fallback after the rules (83% alone, 79% rules only) but takes ~40 s per question while the 3B reads prompts token by token; with the 1.5B it was 83%/46%. Still **off by default**; worth enabling once a model that reads prompts fast is good enough. Earlier note on the 1.5B: measured 46% alone, 83% as fallback vs 79% for rules; below the 90% target, see `tests/eval_classifier.py`; a better prompt or a bigger model may change this) for what rules cannot tell: the local model gets the criteria and a few examples and answers one word
   (`NONE | DOCS | WEB | HISTORY`) with a tiny token limit. Measure its accuracy against the rules before trusting it.
-- [ ] **Always show the decision** in the UI ("used: web (time-sensitive)") with a one-click override ("answer without searching" / "search anyway").
-- [ ] **Escalation hint**: when the model is unsure or the question is long/complex, suggest "ask the cloud" (a button, never automatic).
-- Check: >= 90% agreement with hand-labelled routing on the evaluation set; no regressions in answer quality.
+- [x] **Always show the decision** in the UI ("used: web (time-sensitive)") with a one-click override ("answer without searching" / "search anyway").
+- [x] **Escalation hint** (long or multi-part questions; needs a cloud provider): when the model is unsure or the question is long/complex, suggest "ask the cloud" (a button, never automatic).
+- Check: >= 90% agreement with hand-labelled routing on the evaluation set; no regressions in answer quality. Rules: 19/24 on the classifier set (the rule words were tuned after seeing it, so treat as optimistic); the misses are general questions that default to docs, which the relevance gate keeps harmless.
 
 ## 4. P1: memory and context
 Goal: remember more without getting slower or running out of window.
-- [ ] **Reuse the KV cache across turns** (prefix caching): today every turn re-reads the whole history.
-- [ ] **Rolling summary**: when the window fills, summarise the oldest turns instead of dropping them.
-- [ ] **Longer context** (today 4096 tokens; Qwen2.5 supports 32k): needs chunked attention in the prompt path and a memory budget.
+- [x] **Reuse the KV cache across turns** (prefix caching): today every turn re-reads the whole history. (done)
+- [x] **Rolling summary**: when the window fills, summarise the oldest turns instead of dropping them. **Done:** when the conversation passes a share of the window (default 70%, editable) the model summarises the old turns into notes and keeps the last 3 verbatim (`compact` in `src/serve.py`).
+- [x] **Longer context (priority: documents and code need far more than today's 4096 tokens; 16k is the minimum goal, 32k the native limit of Qwen3).** What it costs on this machine (Qwen3-1.7B, 28 layers, 8 KV heads x 128), worked out, not yet measured: **Done:** default window 80k tokens (editable up to 262k), cut to what fits the GPU memory limit; Qwen3.5-2B reads 100k tokens in 91 s and decodes at ~8 tok/s; fp8 KV and sinks remain (backlog 9).
+  - KV cache: 229 KB per token in float32 = **3.7 GB at 16k** (does not fit next to the model); fp16 = 1.9 GB, int8 = ~1 GB. So fp16 or int8 KV is a prerequisite (also in section 6b).
+  - Prompt attention runs in numpy on one CPU thread and is quadratic: ~52 ms per layer at 512 tokens, so ~50 s per layer at 16k (about 25 minutes per prompt). It has to move to the GPU (torch is already present for embeddings; scores in blocks of 256 queries) or be threaded, and ideally use a sliding/streaming scheme.
+  - Prompt reading itself: 76 tok/s means ~3.5 minutes for 16k tokens, so it must happen once per document: keep the KV cache of a loaded document (prefix reuse already works across turns) and show progress.
+  - Decode: every token scans the whole cache (~1.9 GB of fp32 per token at 16k): fp16/int8 KV and attention on GPU, or the decode slows well below today's 5 tok/s.
+  - RoPE: Qwen3 is trained to 32k (40960 positions); beyond that YaRN scaling would be needed.
+  - Pragmatic plan: raise `max_ctx` step by step (8k, then 16k) with fp16 KV and GPU prompt attention, measure tokens/s and RAM at each step, and keep **retrieval + map-reduce over documents** (section 5) for anything bigger than the window, since reading 100k tokens at 76 tok/s is not realistic.
 - [ ] **Saved chats** (opt-in, local): list, resume, delete, export. Nothing is stored unless you turn it on.
 - [ ] **Remembered facts** (opt-in, local, editable): short notes such as "I use CachyOS" that are added to the prompt; you see and control them.
 - [ ] Do not keep retrieved excerpts in the history (they bloat it); keep only the list of sources.
@@ -62,21 +95,111 @@ Goal: remember more without getting slower or running out of window.
 - [ ] Web: better page text extraction, show publication dates, prefer recent results for time-sensitive questions.
 - [ ] Cap and truncate injected text by token budget, not by characters.
 
+### Documents: chat with your own files (PDF, Markdown, text...)
+- [x] **Add a document** (drag and drop anywhere on the page, or the 📎 button; chips list/remove them; done, `src/documents.py` + `/documents/*`; pick-a-path is not needed): extract text (`.md`, `.txt`, `.rst`, `.html`, `.pdf` via `pdftotext` if present or `pypdf`, later `.docx`/`.epub`), keep page/heading for citations.
+- [ ] **OCR is a requirement, not an extra** (many real PDFs are scans or photos): PDFs with no text layer and images (`.png`, `.jpg`) go through OCR automatically. Engine: `tesseract` (es+en language packs) first, with a setup check in the doctor that says what to install (`sudo pacman -S tesseract tesseract-data-spa tesseract-data-eng`); evaluate a GPU/NPU OCR model later. Show progress per page (OCR is slow) and mark OCR'd text so citations can warn it may contain recognition errors.
+- [x] Chunk by paragraph (heading-aware chunking still open), embed with the existing embedder (same GPU/NPU/CPU choice), store per document in `~/.local/share/npu-lab/` so it can be listed and deleted.
+- [x] New source in Auto/On/Off next to docs and web: **my documents**, with the same relevance gate and the same "used: ..." line; answers cite `[file p.12]`.
+- [ ] Whole-document tasks (summarise a 40-page PDF) need map-reduce over chunks with the local model; slow at ~56 tok/s prompt reading, so offer it explicitly and show the estimate.
+- Check: a scanned PDF (image only) is indexed and answerable; a question whose answer sits on one page of a test PDF returns that page and cites it; a question about something absent says so; nothing leaves the PC.
+
 ## 6. Evaluation (do this first, it keeps everything honest)
-- [ ] `tests/eval_routing.py`: a labelled list of questions (including the field-report rows) with the expected decision
+- [x] `tests/eval_routing.py`: a labelled list of questions (including the field-report rows) with the expected decision
   (`none/docs/web/history`) and, where possible, a required/forbidden source. Runs offline for the rule layer.
 - [ ] `tests/eval_answers.py`: a few questions with checkable facts (e.g. "install an AUR package with paru" must contain `paru -S`
   and must not call AUR the "App Repository"). Compares *without* retrieval vs *with*.
 - [ ] Track accuracy and latency in `bench/RESULTS.md` after each router/memory change.
 
+## 6b. Query optimization: tokens and communication (we own the kernels)
+Measured on the 1.5B (`ms/token` for one decode step; NPU matvec time is constant, the rest is CPU):
+
+| position in context | before | after GQA attention without `np.repeat` |
+|---|---|---|
+| 0 | 150 | 155 (noise) |
+| 1500 | 239 | 187 |
+| 3000 | 351 | 230 |
+
+- [x] **Decode attention no longer copies K/V** (`np.repeat` made a full copy of the cache per layer per token, so every token got slower the longer the prompt; a RAG prompt of ~1500 tokens was ~40% slower). Same output (max error 2e-7).
+- NPU side per token: 138 ms in ~128 launches of int8 matvec, ~9 GB/s effective, so **bytes read per token is the cost**. Candidates, by expected gain:
+  - [x] **Reuse the KV cache of the conversation** (section 4; done: the unchanged start of the prompt is kept, logits identical to a full prefill; a turn that injected excerpts re-reads from that turn on, because its stored text has no excerpts): a 1000-token history costs ~18 s of prompt reading *every turn* at 56 tok/s. Biggest saving per chat, no kernel change.
+  - [x] **Shorter prompts**: instruction block trimmed, excerpts capped by a 700-token budget (`EXCERPT_TOKENS`). Still open: rerank to keep fewer and better ones.
+  - [x] **Smaller lm_head** (opt-in, `NPU_FAST_VOCAB=1`, off by default): measured 6.62 -> 7.27 tok/s (+10%) on 8 prompts, 4x fewer bytes in the output head. Costs a little quality: small spelling slips ("gobiernó") and different, slightly less precise wording in 6 of 8 answers; code fences and byte fallback are kept. Decide the default after the larger-model tests. Original note: it streams 233 MB per token (21 ms, ~14% of a step). A vocabulary restricted to the tokens that appear in Spanish/English/code (built from the docs index) would cut that ~4x; costs the ability to emit rare tokens (CJK...), so make it a setting and compare answers.
+  - [ ] **Fewer launches**: ~100 us fixed per call x ~128 calls = ~13 ms/token. Merge the 16 lm_head chunks into fewer, larger calls (needs new xclbin shapes) and fuse the o-projection with the residual.
+  - [x] **Measured: batched verification is NOT nearly free with this kernel.** `src/kernels/mv_i8_nv.cc` (one weight load feeds NV accumulators; correct against numpy), 4864x896, 2 cores: **NV=1 448 us, NV=2 571 us, NV=4 1069 us** (per vector 448 / 286 / 267 us). Hoisting the activation patterns out of the row loop changed nothing, so the limit is the int16 multiply-accumulate rate (~250 us per vector floor), not memory. Consequence: verifying k drafted tokens costs ~1.25x (k=2) to ~2.3x (k=4) one decode step, so even with 60% draft acceptance the gain is ~1.1-1.3x, far below the 1.7-2x estimated below. Do not build speculative decoding on this kernel; a faster inner loop (int8 x int8 activations, or a better mac schedule) would be needed first.
+  - [x] **4-column engine (done)**: ONE 4-column decode context for the whole model. Every matrix is run as pieces of the same K (K = gcd of hidden, attention and FFN widths: 2048 for Qwen3-1.7B, 1024 for 0.6B); `down_proj` (K=6144) is three calls whose int32 results are added, which costs ~5 ms per token but removes every context switch (~410 us each). Prefill moved to 4 columns too (a 4-column context cannot coexist with 2-column ones; two 4-column ones can). Qwen3-1.7B, same 8 prompts, **identical outputs**: decode **5.21 -> 7.80 tok/s** over the 8 prompts (steady state 107 ms/token = 9.3 tok/s), prompt reading **76 -> 93 tok/s**. Matvec kernels are 1.5-1.7x faster per call (4096x2048: 775 -> 464 us; 12288x2048: 2086 -> 1204 us). Remaining gap between 9.3 and 7.8 tok/s is host work per token (tokenizer decode of the whole answer each token, repetition penalty copy of 152k logits): next cheap win.
+  - [x] (superseded) Observation to chase instead: decode time scales with columns (4864x896: 1 core 746 us, 2 cores 448, 4 cores 291), so the decode is per-core limited, not DRAM limited. A 4-column decode would be ~1.5x faster per matvec but conflicts with the two resident 2-column contexts and the 2-column prefill contexts (context switch ~450 us per xclbin change). Needs a single xclbin that serves every K (K as a runtime value) to avoid switches.
+- [x] **Prefill** (1.5B, 512-token prompt): 51 -> **74 tok/s** with identical logits (cos 1.0 split vs full): causal blocks in the prompt attention (the masked upper triangle was computed and thrown away) and SiLU without temporaries. Profile of the rest: NPU wait 4.1 s of 6.9 s, i.e. ~390 GFLOPS, the 2-column roof.
+- [x] **lm_head chunks submitted together** (own output buffer each, input sent once): 6.50 -> 6.62 tok/s, within noise; kept because it is simpler per call.
+- Decode profile (20 steps): 86% of the time is waiting on the NPU (~11.8 GB/s over 1.54 GB/token), Python/numpy is ~14%. So further decode gains must come from fewer bytes (int4 weights, smaller head) or more tokens per weight read (speculative decoding), not from micro-optimising the host code.
+  - [ ] **int4 weights** (group-wise) with a nibble-unpack step in `mv_i8.cc`: ~40% fewer bytes per token (decode ~1.6x on paper); needs a quality check per model.
+- Check: a profile like the table above (script in the PR), plus unchanged answers on the eval set.
+
 ## 7. Platform, UX and housekeeping
-- [ ] **Memory use**: embeddings in bf16 (-0.45 GB), fp16 KV cache, show the model's RAM before loading, and turn the fast prompt reader off
+- [~] **Memory use**: embeddings in bf16 (-0.45 GB), fp16 KV cache, show the model's RAM before loading, and turn the fast prompt reader off (done: embeddings are memory-mapped, no float32 copy; the 4B loads in 27 s; open: show the model's RAM before loading.)
   automatically when free RAM is low (it keeps a 2.6 GB second copy of the 1.5B weights).
-- [ ] Clear "loading model, NPU busy" state while a model loads (about 30 s for the 1.5B).
-- [ ] 3B model (needs padding of dimensions that are not multiples of 64/128) and a smaller/faster prompt path.
+- [~] Clear "loading model, NPU busy" state while a model loads (about 30 s for the 1.5B). (loads now take 5-27 s; the UI shows the NPU-busy state).
 - [ ] Windows: the launcher and UI should work; NPU backends there need AMD's Ryzen AI stack, which is untested here.
 - [ ] XDNA2 (Ryzen AI 300) report: the kernels target `npu1`; contributors with that hardware are welcome (see `CONTRIBUTING.md`).
 - [ ] Package the launcher binary (releases) and a one-command setup check.
+
+## 8. Models and GPU helpers (decision record)
+Labels: **measured** = in `bench/RESULTS.md`; **estimate** = extrapolated, not run; **proposal** = does not exist yet.
+Hardware of the test machine: Ryzen 5 8645HS (XDNA1), RTX 3050 6 GB laptop (also drives the desktop, so keep VRAM modest, `gpu_vram_gb` default 1.5), 16 GB shared RAM.
+
+**Measured:** Qwen2.5-0.5B int8 ~15.7 tok/s decode, ~170 tok/s prompt; 1.5B ~6.3 tok/s decode, ~56 tok/s prompt; embeddings ~1100 chunks/s on GPU vs ~20 on NPU.
+Decode reaches only ~6-8 GB/s effective, far below DRAM, so the limit is the kernels/DMA, not memory.
+
+**Decision: Qwen2.5-3B is not the default; at most an optional "quality (slow)" profile.**
+- [x] **Measured (Qwen2.5-3B, int8, prompt reading token by token)**: **3.58 tok/s** decode (1.5B: 6.62), same 8 prompts. Needed 6 new matvec kernels (all tile without padding) and sharded-safetensors support in `Weights`. The fast prompt reader does not fit: its bf16 copy is ~6 GB and only ~7 GB of RAM were free, so prompt reading stays at ~3 tok/s (a 1000-token RAG prompt would take minutes). Answers: clearly better on instruction following (translated to English where the 1.5B just repeated the Spanish; explained `chmod 755` correctly where the 1.5B got it wrong), equal on facts (Bogota), and both invented the meaning of "NPU". Verdict: usable as the optional "quality (slow)" profile for short questions; not the default. To make it practical, prefill would have to read bf16 weights from disk per layer or use int8 (accuracy check needed).
+
+**Candidate NPU models** (decode tok/s are estimates unless marked):
+
+| Model | Decode | Licence | Role / notes |
+|---|---|---|---|
+| Qwen2.5-0.5B | 15.7 (measured) | Apache-2.0 | fast mode / draft |
+| Qwen3-0.6B | ~13 | Apache-2.0 | newer draft |
+| Llama-3.2-1B | ~7-8 | Llama community | fast; intermediate 8192 (clean tiling), no bias (small change), Spanish supported |
+| Qwen2.5-1.5B | 6.3 (measured) | Apache-2.0 | current baseline |
+| Qwen3-1.7B | ~5.5-6 | Apache-2.0 | best quality/cost; needs QK-norm and no qkv bias in `qwen_npu.py`; use `/no_think` |
+| Qwen3-4B | ~2-3 | Apache-2.0 | quality profile, only with speculative decoding |
+
+**Measured (8 prompts, 120 tokens, greedy; same engine):**
+
+| Model | Decode | Prompt reading | Notes |
+|---|---|---|---|
+| Qwen2.5-1.5B | 6.62 tok/s | 74 tok/s | invents things; fails the translation prompt |
+| **Qwen3-1.7B** (ported: QK-norm, no bias, thinking off) | **5.21 tok/s** | **76 tok/s** | coherent, translates and explains `chmod` correctly; as router classifier 83% alone, **100% (24/24) after the rules**, 2.8 s per question |
+| Qwen2.5-3B | 3.58 tok/s | ~3 tok/s (no RAM for the fast reader) | best instruction following of the Qwen2.5 family, too slow; classifier 92% at 40 s per question |
+
+Verdict: **Qwen3-1.7B becomes the recommended main model** (about 20% slower decode than the 1.5B for clearly better answers); 1.5B stays as the fast option, 3B as the optional slow profile. The 24-question set is small and the rules were tuned on it, so the 100% is a ceiling, not a promise.
+
+**Which Qwen fits this machine (checked on the Hugging Face model cards, Oct 2026).** Budget: ~21 GB/s of NPU weight streaming (measured), ~7 GB of free RAM, int8 weights resident plus a bf16 copy for fast prompt reading. Estimated tok/s = 21 GB/s over the int8 bytes read per token + ~25 ms of host work (the formula reproduces the measured 9.3 tok/s of Qwen3-1.7B):
+
+| Model | int8 GB/token | est. tok/s | bf16 prefill copy | Fits? |
+|---|---|---|---|---|
+| Qwen3-0.6B | 0.60 | ~19 | 0.9 GB | yes, works today (fast mode) |
+| **Qwen3-1.7B** | 1.72 | **9.3 (measured)** | 2.8 GB | **yes, works today (main)** |
+| Qwen3.5-0.8B | 0.75 | ~16 | 1.0 GB | needs port |
+| **Qwen3.5-2B** | 1.88 | ~8.7 | 2.7 GB | needs port; best target |
+| Qwen3.5-4B / Qwen3-4B | 4.2 / 4.0 | ~4.5 | 7.1-7.3 GB | RAM only without fast prompt reading |
+| Qwen3.5-9B, 27B, MoE (35B-A3B...), Coder-Next 80B | 8+ | <2.5 | >13 GB | no |
+
+Qwen3.5 (Feb-Mar 2026, Apache-2.0, 201 languages, 262k native context) is a hybrid: 3 Gated DeltaNet (linear attention) layers per 1 gated-attention layer, head_dim 256, partial RoPE (25%), output gate on attention, vocabulary 248k (the output head is 27% of the bytes of the 2B), a built-in multi-token-prediction head and thinking on by default (`enable_thinking=false` through the chat template). Why the 2B is the target: same speed class as Qwen3-1.7B, newer and stronger, and the hybrid design makes long context cheap: only 6 of its 24 layers keep a KV cache (~12 KB/token, i.e. ~0.2 GB at 16k and ~1.5 GB at 128k in fp16) while the DeltaNet layers keep a fixed-size state. That directly answers the long-context need above. Cost: the engine needs a new Gated DeltaNet layer (short conv + delta-rule recurrence + gating, in numpy on the CPU; its projections still run on the NPU), gated attention, partial RoPE and the bigger vocabulary; validate against the reference implementation (needs `transformers` installed for a numerical check). The 4B is the later "quality" profile once prompt reading no longer needs a bf16 copy in RAM.
+
+Leaning (earlier note): main = Qwen3-1.7B (or keep 1.5B at zero cost); fast = Llama-3.2-1B or 0.5B.
+
+**GPU as a helper** (small VRAM, short bursts), by value per VRAM:
+- [ ] **Reranker** cross-encoder on GPU (top-20 -> top-4), 0.1-1 GB; start with a small multilingual one (mmarco-mMiniLM style). Shorter prompt means less NPU prefill. Complements section 5.
+  Risk: only pays off if the bf16 prompt kernels are efficient at tiny M (4-6 tokens); benchmark that first.
+- [x] Embeddings for big indexes on GPU (`--device gpu`).
+- Not now: prompt on GPU + decode on NPU (moving the KV cache between backends costs too much to integrate).
+
+**Order of work:**
+1. Reranker on GPU; measure prompt-size reduction and time to first token.
+2. Port Qwen3-1.7B or Llama-3.2-1B; compare with Qwen2.5-1.5B on ~20 real Arch/paru/pacman questions, with and without docs.
+3. Benchmark the verification kernel at small M to decide if speculative decoding is viable.
+4. Check int8 does not hurt quality (cosine or perplexity vs bf16).
+5. If 3B/4B clearly helps, add it as the "quality (slow)" profile in the resource selector, never as a replacement.
 
 ## Principles
 1. Decide per question; show the decision; let the user override it.

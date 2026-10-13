@@ -24,7 +24,7 @@ threading.Thread(target=fake.serve_forever, daemon=True).start()
 TOKEN = "t" * 43
 p = subprocess.Popen([sys.executable, "-u", "src/serve.py"], cwd=ROOT, stdout=subprocess.PIPE, text=True,
                      env={**os.environ, "NPU_LAB_TOKEN": TOKEN, "NPU_LAB_CODE": "c" * 43, "NPU_LAB_RULES": os.path.join(__import__("tempfile").mkdtemp(), "rules.json"),
-                                    "NPU_LAB_SETTINGS": os.path.join(__import__("tempfile").mkdtemp(), "providers.json")})
+                                    "NPU_LAB_DOCS": os.path.join(__import__("tempfile").mkdtemp(), "documents"), "NPU_LAB_ROUTING": os.path.join(__import__("tempfile").mkdtemp(), "routing.json"), "NPU_LAB_SETTINGS": os.path.join(__import__("tempfile").mkdtemp(), "providers.json")})
 port = json.loads(p.stdout.readline())["port"]
 
 
@@ -73,6 +73,33 @@ try:
     check("settings saved, response has no secrets", s == 200 and KEY.encode() not in b and b"BRAVE-SECRET" not in b and json.loads(b)["cloud"]["providers"]["fake"]["has_key"])
     check("GET /settings has no secrets", KEY.encode() not in call("GET", "/settings")[1] and b"BRAVE-SECRET" not in call("GET", "/settings")[1])
     check("status never contains a key", KEY.encode() not in call("GET", "/status")[1])
+    def upload(name, data, token=TOKEN):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=300)
+        c.request("POST", "/documents/upload?name=" + name, data, {"Host": f"127.0.0.1:{port}", **({"Authorization": "Bearer " + token} if token else {})})
+        r = c.getresponse(); r.read(); return r.status
+
+    def wait_job():
+        for _ in range(200):
+            j = json.loads(call("GET", "/documents")[1])
+            if j["job"]["state"] != "running":
+                return j
+            time.sleep(0.3)
+    check("documents: upload needs the token", upload("a.md", b"x", token=None) == 401)
+    check("documents: markdown accepted", upload("notas.md", b"# Notas\n\nLa reunion del equipo es los martes a las 10.\n") == 202)
+    j = wait_job()
+    check("documents: imported and listed", j["job"]["state"] == "done" and j["documents"][0]["name"] == "notas.md" and j["documents"][0]["chunks"] >= 1)
+    upload("evil.exe", b"MZ"); j = wait_job()
+    check("documents: unsupported type refused", j["job"]["state"] == "error" and "unsupported" in j["job"]["error"])
+    upload("../../etc/x.md", b"hola mundo desde un archivo"); j = wait_job()
+    check("documents: path in name is stripped", j["job"]["state"] == "done" and all("/" not in d["name"] for d in j["documents"]))
+    check("documents: bad id refused", call("POST", "/documents/delete", {"id": "../../x"})[0] == 400)
+    for d_ in j["documents"]:
+        call("POST", "/documents/delete", {"id": d_["id"]})
+    check("documents: deleted", json.loads(call("GET", "/documents")[1])["documents"] == [])
+    check("routing: defaults served", "fresh" in json.loads(call("GET", "/routing")[1]))
+    check("routing: bad pattern refused", call("POST", "/routing", {"fresh": ["(unclosed"]})[0] == 400)
+    s_, b_ = call("POST", "/routing", {"fresh": ["tomorrow"], "classifier": True})
+    check("routing: custom words saved", s_ == 200 and json.loads(call("GET", "/routing")[1])["fresh"] == ["tomorrow"])
     check("bad provider kind refused", call("POST", "/settings", {"cloud": {"providers": {"x": {"kind": "evil"}}}})[0] == 400)
     s, body = call("POST", "/chat", {"prompt": "hola", "backend": "cloud", "history": [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]})
     lines = [json.loads(x) for x in body.decode().splitlines() if x]
@@ -81,13 +108,13 @@ try:
     check("chat without a loaded model -> 409", call("POST", "/chat", {"prompt": "hi"})[0] == 409)
     check("oversized body -> 413", call("POST", "/profile", None, headers={"Content-Length": "9999999"})[0] in (413, 400))
 
-    if os.path.exists("/dev/accel/accel0") and os.path.exists(os.path.join(ROOT, "models/qwen/model.safetensors")):
+    if os.path.exists("/dev/accel/accel0") and os.path.exists(os.path.join(ROOT, "models/qwen3/model.safetensors.index.json")):
         t = time.time()
-        check("load LLM", call("POST", "/mode", {"mode": "llm", "model": "qwen"})[0] == 200)
+        check("load LLM", call("POST", "/mode", {"mode": "llm", "model": "qwen3"})[0] == 200)
         s, body = call("POST", "/chat", {"prompt": "What is the capital of France? One sentence.", "tokens": 30})
         lines = [json.loads(x) for x in body.decode().splitlines() if x]
         text = "".join(x.get("token", "") for x in lines)
-        check(f"chat streams an answer ({text.strip()[:40]!r})", s == 200 and "Paris" in text and lines[-1].get("done"))
+        check(f"chat streams an answer ({text.strip()[:40]!r})", s == 200 and ("Paris" in text or "París" in text) and lines[-1].get("done"))
         if os.path.exists(os.path.expanduser("~/.local/share/npu-lab/docs.pkl")):
             s, body = call("POST", "/chat", {"prompt": "¿Cómo instalo un paquete del AUR usando paru?", "tokens": 25, "docs": True})
             lines = [json.loads(x) for x in body.decode().splitlines() if x]
@@ -97,10 +124,49 @@ try:
                                          "history": [{"role": "user", "content": "My name is Zed."}, {"role": "assistant", "content": "Nice to meet you, Zed."}]})
         text = "".join(json.loads(x).get("token", "") for x in body.decode().splitlines() if x)
         check(f"local chat remembers earlier turns ({text.strip()[:40]!r})", s == 200 and "Zed" in text)
+        h = [{"role": "user", "content": "My name is Zed."}, {"role": "assistant", "content": "Nice to meet you, Zed."}]
+        s, body = call("POST", "/chat", {"prompt": "What is my name? One word.", "tokens": 8, "docs": False, "web": False, "history": h})
+        st = json.loads(body.decode().splitlines()[-1])["stats"]
+        check(f"next turn reuses the start of the previous prompt ({st['reused_tokens']} of {st['prefill_tokens']} tokens)", st["reused_tokens"] > 20)
         check("switch to search frees the NPU and loads the embedder", call("POST", "/mode", {"mode": "search", "device": "npu"})[0] == 200)
         s, body = call("POST", "/search", {"query": "servidor PHP base de datos", "n": 3})
         res = json.loads(body).get("results", [])
         check(f"search returns results ({len(res)})", s == 200 and len(res) > 0)
+        check("NPU-only profile: the GPU is not used", json.loads(call("GET", "/status")[1]).get("gpu_assist") is False)
+        call("POST", "/mode", {"mode": "none"})
+        check("switch to the assisted profile", call("POST", "/profile", {"profile": "assisted"})[0] == 200)
+        try:
+            import torch
+            has_gpu = torch.cuda.is_available()
+        except ImportError:
+            has_gpu = False
+        if has_gpu:
+            check("rules: small window and early compaction accepted", call("POST", "/rules", {"context_tokens": 2048, "compact_at": 0.5})[0] == 200)
+            check("rules: absurd window refused", call("POST", "/rules", {"context_tokens": 10})[0] == 400)
+            check("assisted: load LLM", call("POST", "/mode", {"mode": "llm", "model": "qwen3"})[0] == 200)
+            check("assisted: the GPU reads prompts and holds the KV cache", json.loads(call("GET", "/status")[1]).get("gpu_assist") is True)
+            s, body = call("POST", "/chat", {"prompt": "What is the capital of Italy? One sentence.", "tokens": 30, "docs": False, "web": False})
+            text = "".join(json.loads(x).get("token", "") for x in body.decode().splitlines() if x)
+            check(f"assisted: chat answers ({text.strip()[:40]!r})", s == 200 and ("Rome" in text or "Roma" in text))
+            long = [{"role": "user" if i % 2 == 0 else "assistant", "content": ("El proyecto Zorbo usa un robot con sensores de temperatura en la sala B. " * 22) + f"(mensaje {i})"} for i in range(8)]
+            s, body = call("POST", "/chat", {"prompt": "En una frase: ¿qué robot menciona la conversación?", "tokens": 40, "docs": False, "web": False, "mine": False, "history": long})
+            lines = [json.loads(x) for x in body.decode().splitlines() if x]
+            comp = next((l["compacted"] for l in lines if "compacted" in l), None)
+            check(f"a conversation past the threshold is compacted into notes ({len(comp['summary']) if comp else 0} chars, kept {comp['kept'] if comp else '-'} messages)",
+                  s == 200 and comp is not None and len(comp["summary"]) > 20 and comp["kept"] == 6 and lines[-1].get("done"))
+        if has_gpu and os.path.exists(os.path.join(ROOT, "models/qwen35_2b/config.json")):
+            check("qwen3.5 refused without the assisted profile", (call("POST", "/profile", {"profile": "npu_only"}), call("POST", "/mode", {"mode": "llm", "model": "qwen35m"}))[1][0] == 409)
+            call("POST", "/profile", {"profile": "assisted"})
+            check("gpu_share must be 0, 0.25 or 0.5", call("POST", "/rules", {"gpu_share": 0.3})[0] == 400)
+            call("POST", "/rules", {"context_tokens": 80000, "gpu_share": 0.5, "compact_at": 0.7})
+            s, _ = call("POST", "/mode", {"mode": "llm", "model": "qwen35m"})
+            check("qwen3.5-2B loads with a 50% GPU share", s == 200)
+            if s == 200:
+                st = json.loads(call("GET", "/status")[1])
+                check(f"qwen3.5: GPU assist on, context {st['context']} tokens", st["gpu_assist"] is True and st["context"] >= 8192)
+                s, body = call("POST", "/chat", {"prompt": "What is the capital of Italy? One sentence.", "tokens": 30, "docs": False, "web": False, "mine": False})
+                text = "".join(json.loads(x).get("token", "") for x in body.decode().splitlines() if x)
+                check(f"qwen3.5 answers ({text.strip()[:40]!r})", s == 200 and ("Rome" in text or "Roma" in text))
         check("unload", call("POST", "/mode", {"mode": "none"})[0] == 200)
         print(f"NPU cycle took {time.time()-t:.0f}s")
     else:

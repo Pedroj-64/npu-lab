@@ -133,20 +133,30 @@ def load():
     return pickle.load(open(IDX, "rb")) if os.path.exists(IDX) else None
 
 
-STOP = {"como", "para", "que", "los", "las", "una", "con", "del", "por", "the", "and", "for", "how", "can", "install", "instalar"}
+STOP = {"como", "para", "que", "los", "las", "una", "con", "del", "por", "the", "and", "for", "how", "can", "install", "instalar",
+        # ordinary words that are also command names: a title match on these means nothing
+        "make", "size", "talk", "chat", "list", "find", "time", "file", "files", "show", "test", "split", "sort", "last", "write",
+        "read", "look", "head", "tail", "join", "link", "mail", "pass", "watch", "wait", "yes", "true", "false", "which", "who", "cal",
+        "class", "price", "date", "word", "more", "less", "kill", "install", "update", "remove", "open", "close", "run", "what"}
+MIN_COS = 0.55        # raw similarity needed when no (meaningful) command name appears in the question
 
 
-def retrieve(model, query, k=4, idx=None):
-    """Best chunk per source for `query`: [{score, src, title, text}]."""
+def retrieve(model, query, k=4, idx=None, gate=True):
+    """Best chunk per source for `query`: [{score, cos, named, src, title, text}].
+    With `gate`, only excerpts that are relevant are returned (possibly none): the command is named in the question
+    as a whole word, or the raw similarity is >= MIN_COS."""
     idx = idx or load()
     if not idx:
         return []
     q = model.encode([query])[0].astype(np.float32)
-    sc = idx["emb"].astype(np.float32) @ q
+    cos = idx["emb"].astype(np.float32) @ q
+    sc = cos.copy()
     qw = {w for w in re.findall(r"[a-z0-9][a-z0-9+._-]{2,}", query.lower()) if w not in STOP}
     if qw:                                                    # a command name in the query should find its own page
         title_hit = np.array([t.lower() in qw for t in idx["title"]], dtype=np.float32)
         sc = sc + 0.30 * title_hit
+    else:
+        title_hit = np.zeros(len(sc), np.float32)
     sc = sc + 0.04 * np.array([x.startswith("tldr:") for x in idx["src"]], dtype=np.float32)   # short, practical pages first
     res, seen = [], set()
     for i in np.argsort(-sc):
@@ -154,7 +164,9 @@ def retrieve(model, query, k=4, idx=None):
         if s in seen:
             continue
         seen.add(s)
-        res.append({"score": float(sc[i]), "src": s, "title": idx["title"][i], "text": idx["text"][i]})
+        if gate and not (title_hit[i] or cos[i] >= MIN_COS):
+            continue
+        res.append({"score": float(sc[i]), "cos": float(cos[i]), "named": bool(title_hit[i]), "src": s, "title": idx["title"][i], "text": idx["text"][i]})
         if len(res) >= k:
             break
     return res

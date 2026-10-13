@@ -8,16 +8,19 @@ Security model: binds 127.0.0.1 on a random port; every API request needs `Autho
 URL fragment, which never reaches the server); the Host header must be loopback; an Origin header is only
 accepted if it is this server's own origin; no CORS headers; only whitelisted models; folders only under $HOME.
 
-API (JSON):  POST /login (one-time code -> token)   GET /status /rules /doctor /settings   POST /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
+API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /doctor /settings   POST /routing /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
 """
 import gc, hmac, json, os, secrets, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-MODELS = {"qwen": "models/qwen", "qwen15": "models/qwen15"}   # whitelist: the API never takes a path
+# Qwen3.5 (hybrid) needs the GPU: Assisted profile only. Qwen3 (dense) also runs NPU only.
+MODELS = {"qwen35s": "models/qwen35_08b", "qwen35m": "models/qwen35_2b", "qwen35l": "models/qwen35_4b", "qwen3s": "models/qwen3s", "qwen3": "models/qwen3"}
+NEEDS_GPU = ("qwen35s", "qwen35m", "qwen35l")   # whitelist: the API never takes a path
 PROFILES = ("npu_only", "assisted")                           # assisted: GPU/CPU may help bulk indexing
-MAX_BODY, MAX_PROMPT, MAX_TOKENS = 64 * 1024, 8000, 1024
+MAX_BODY, CHAT_BODY, MAX_TOKENS = 64 * 1024, 16 * 1024 * 1024, 4096     # a chat request may carry a whole long conversation or document
+DEFAULT_CONTEXT = 80000                                                    # tokens; the window actually used is cut to what fits in the GPU memory limit
 TOKEN = os.environ.get("NPU_LAB_TOKEN") or secrets.token_urlsafe(32)
 CODE = os.environ.get("NPU_LAB_CODE")      # one-time login code the launcher puts in the URL (swapped for TOKEN once)
 _code_lock = threading.Lock()
@@ -32,6 +35,20 @@ class State:
         self.job = {"state": "idle"}              # index job status
         self.stop = threading.Event()
         self.docs, self.embedder = None, None     # local documentation index + a CPU query embedder (~110 ms per question)
+        self.emb_lock = threading.Lock()          # the CPU embedder is shared by chat retrieval and document import
+        self.docjob = {"state": "idle"}           # import status of "my documents"
+
+    def cpu_embedder(self):
+        import search
+
+        class Locked:                             # encode() one caller at a time
+            def __init__(s, m): s.m = m
+            def encode(s, texts):
+                with self.emb_lock:
+                    return s.m.encode(texts)
+        if self.embedder is None:
+            self.embedder = Locked(search.make_model("cpu"))
+        return self.embedder
 
     def unload(self):
         self.engine, self.mode, self.model = None, "none", None
@@ -76,6 +93,31 @@ def set_rules(d):
                 raise Bad(400, f"must be an existing folder inside your home (use ~ for the whole home): {x}")
             clean.append("~" + real[len(home):])
         r["roots"] = clean
+    if "state_cache_gb" in d:
+        v = float(d["state_cache_gb"])
+        if not 0 <= v <= 100:
+            raise Bad(400, "state_cache_gb must be between 0 (off) and 100")
+        r["state_cache_gb"] = v
+    if "gpu_share" in d:
+        v = float(d["gpu_share"])
+        if v not in (0.0, 0.25, 0.5):
+            raise Bad(400, "gpu_share must be 0 (NPU only), 0.25 or 0.5")
+        r["gpu_share"] = v
+    if "compact_at" in d:
+        a = float(d["compact_at"])
+        if not (a == 0 or 0.3 <= a <= 0.95):
+            raise Bad(400, "compact_at must be 0 (off) or between 0.3 and 0.95")
+        r["compact_at"] = a
+    if "llm_vram_gb" in d:
+        g = float(d["llm_vram_gb"])
+        if not 1.0 <= g <= 6.0:
+            raise Bad(400, "llm_vram_gb must be between 1 and 6")
+        r["llm_vram_gb"] = g
+    if "context_tokens" in d:
+        n = int(d["context_tokens"])
+        if not 2048 <= n <= 262144:
+            raise Bad(400, "context_tokens must be between 2048 and 262144")
+        r["context_tokens"] = n
     if "gpu_vram_gb" in d:
         g = float(d["gpu_vram_gb"])
         if not 0.5 <= g <= 4:
@@ -109,19 +151,30 @@ def doctor():
         add("memlock", False, "not applicable here", "")
     from qwen_npu import shapes
     import prefill_npu
+    HF = {"qwen3": "Qwen/Qwen3-1.7B", "qwen3s": "Qwen/Qwen3-0.6B", "qwen35s": "Qwen/Qwen3.5-0.8B", "qwen35m": "Qwen/Qwen3.5-2B", "qwen35l": "Qwen/Qwen3.5-4B"}
     for name, d in MODELS.items():
-        has_model = os.path.exists(os.path.join(ROOT, d, "model.safetensors"))
+        has_model = os.path.isdir(os.path.join(ROOT, d)) and any(f.endswith(".safetensors") for f in os.listdir(os.path.join(ROOT, d)))
+        if not has_model and name not in ("qwen3", "qwen35m"):
+            continue                                  # optional models: nothing to report until you download them
         add(f"model_{name}", has_model, d if has_model else f"{d}/model.safetensors missing",
-            "Download Qwen/Qwen2.5-" + ("0.5B" if name == "qwen" else "1.5B") + f"-Instruct (model.safetensors, tokenizer.json, config.json) into {d}/.")
+            f"Download {HF[name]} (safetensors, tokenizer.json, config.json) into {d}/.")
         if has_model:
-            need = [f"c2_{m}x{k}" for m, k in shapes(json.load(open(os.path.join(ROOT, d, "config.json"))))]
-            miss = [n for n in need if not os.path.exists(os.path.join(ROOT, "build/c2", n + ".xclbin"))]
-            add(f"kernels_{name}", not miss, "all built" if not miss else f"{len(miss)} missing",
-                f"python scripts/build_matvec.py --shared $(python src/qwen_npu.py --model {d} --shapes)")
             cfg = json.load(open(os.path.join(ROOT, d, "config.json")))
-            missp = [x for x in prefill_npu.shapes(cfg) if not os.path.exists(os.path.join(ROOT, prefill_npu.xclbin_name(*x) + ".xclbin"))]
-            add(f"prefill_{name}", not missp, "all built" if not missp else f"{len(missp)} missing (prompts will be read slowly)",
-                f"python scripts/build_prefill.py {d}")
+            import qwen35_npu
+            import search as _s
+            share = float(_s.rules().get("gpu_share", 0.0))
+            need = [f"c4_{m}x{k}" for m, k in (qwen35_npu.shapes(qwen35_npu.text_config(cfg), share) if name in NEEDS_GPU else shapes(cfg))]
+            miss = [n for n in need if not os.path.exists(os.path.join(ROOT, "build/c4", n + ".xclbin"))]
+            add(f"kernels_{name}", not miss, "all built" if not miss else f"{len(miss)} missing",
+                f"python scripts/build_matvec.py --shared4 $(python src/qwen35_npu.py --model {d} --shapes" + (f" --share {share}" if name in NEEDS_GPU and share else "") + ")")
+            if name not in NEEDS_GPU:                 # Qwen3.5 reads prompts on the GPU: no NPU prefill kernels
+                missp = [x for x in prefill_npu.shapes(cfg) if not os.path.exists(os.path.join(ROOT, prefill_npu.xclbin_name(*x) + ".xclbin"))]
+                add(f"prefill_{name}", not missp, "all built" if not missp else f"{len(missp)} missing (prompts will be read slowly)",
+                    f"python scripts/build_prefill.py {d}")
+    import shutil
+    add("documents_pdf", bool(shutil.which("pdftotext")), "pdftotext found" if shutil.which("pdftotext") else "pdftotext missing (PDF files cannot be read)", "sudo pacman -S poppler")
+    add("documents_ocr", bool(shutil.which("tesseract")), "tesseract found" if shutil.which("tesseract") else "optional: tesseract missing (scanned PDFs and images cannot be read)",
+        "sudo pacman -S tesseract tesseract-data-spa tesseract-data-eng")
     import docs
     add("docs_index", os.path.exists(docs.IDX), "built" if os.path.exists(docs.IDX) else "not built (chat cannot use local documentation)",
         "python src/docs.py --device gpu build   (needs the tldr cache: `tldr --update`; optional: sudo pacman -S arch-wiki-docs). Without a GPU use --device npu (slower).")
@@ -133,6 +186,31 @@ def doctor():
     add("gpu_helper", importlib.util.find_spec("torch") is not None, "torch present (optional)" if importlib.util.find_spec("torch") else "optional, not installed",
         "Optional: pip install torch for the fast first-time indexing helper.")
     return out
+
+
+SUMMARY_SYSTEM = ("You compress a conversation into notes for yourself. Keep every name, number, file name, command, code identifier, decision, "
+                  "constraint and open question; drop greetings and repetition. Write in the language of the conversation, as plain bullet points, "
+                  "at most 300 words.")
+
+
+def compact(history, window, at, keep, phase):
+    """When the conversation passes `at` of the context window, summarise all but the last `keep` turns with the loaded model.
+    Returns (history, None) untouched, or (notes + recent turns, {"summary", "kept"}). at = 0 disables it."""
+    tok = S.engine.tok
+    count = lambda t: len(tok.encode(t, add_special_tokens=False).ids)
+    if not at or len(history) <= keep * 2 or sum(count(m["content"]) + 8 for m in history) < window * at:
+        return history, None
+    old, recent = history[:-keep * 2], history[-keep * 2:]
+    ids = tok.encode("\n".join(f"{m['role']}: {m['content']}" for m in old), add_special_tokens=False).ids
+    step = max(512, int(window * 0.4))                    # pieces that fit comfortably next to the notes and the instructions
+    pieces = [tok.decode(ids[i:i + step]) for i in range(0, len(ids), step)]
+    notes = ""
+    for k, piece in enumerate(pieces):
+        phase(done=k, of=len(pieces))
+        notes = S.engine.complete(f"Previous notes:\n{notes or '(none)'}\n\nNext part of the conversation:\n{piece}\n\nWrite the updated notes.",
+                                  SUMMARY_SYSTEM, 400).strip()
+    pair = [{"role": "user", "content": "[Notes of the earlier conversation]\n" + notes}, {"role": "assistant", "content": "Understood, I will use those notes."}]
+    return pair + recent, {"summary": notes, "kept": len(recent)}
 
 
 class Bad(Exception):
@@ -154,8 +232,13 @@ def set_mode(mode, model=None, device="npu"):
         if mode == "llm":
             if model not in MODELS:
                 raise Bad(400, f"model must be one of {sorted(MODELS)}")
-            from qwen_npu import Qwen
-            S.engine, S.mode, S.model = Qwen(MODELS[model]), "llm", model
+            from qwen35_npu import load_engine
+            import search
+            if model in NEEDS_GPU and S.profile != "assisted":
+                raise Bad(409, "Qwen3.5 models use the GPU for prompt reading and attention: switch to the Assisted profile (or pick a Qwen3 model for NPU only)")
+            rl = search.rules()
+            # assisted: the GPU reads prompts and holds the KV cache / DeltaNet state; the NPU still generates every token
+            S.engine, S.mode, S.model = load_engine(MODELS[model], gpu=S.profile == "assisted", max_ctx=int(rl.get("context_tokens", DEFAULT_CONTEXT)), vram_gb=float(rl.get("llm_vram_gb", 4.0)), gpu_share=float(rl.get("gpu_share", 0.0)), cache_gb=float(rl.get("state_cache_gb", 8.0))), "llm", model
         elif mode == "search":
             if device not in ("npu", "gpu", "cpu"):
                 raise Bad(400, "device must be npu|gpu|cpu")
@@ -228,9 +311,9 @@ class H(BaseHTTPRequestHandler):
         if not hmac.compare_digest(got.encode(), f"Bearer {TOKEN}".encode()):
             raise Bad(401, "unauthorized")
 
-    def _body(self):
+    def _body(self, limit=MAX_BODY):
         n = int(self.headers.get("Content-Length") or 0)
-        if n > MAX_BODY:
+        if n > limit:
             raise Bad(413, "body too large")
         try:
             d = json.loads(self.rfile.read(n) or b"{}")
@@ -270,9 +353,34 @@ class H(BaseHTTPRequestHandler):
             return
         self._handle(self._get)
 
+    def _upload(self):
+        """POST /documents/upload?name=file.pdf with the raw file as body: imported in the background (poll GET /documents)."""
+        import documents, urllib.parse
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > documents.MAX_BYTES:
+            raise Bad(413, f"file too large (max {documents.MAX_BYTES // 2**20} MB)")
+        name = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("name", ["document"])[0]
+        data = self.rfile.read(n)
+        if S.docjob["state"] == "running":
+            raise Bad(409, "another document is still being imported")
+        S.docjob = {"state": "running", "name": os.path.basename(name)[:120], "msg": "starting"}
+
+        def work():
+            try:
+                documents.add(S.cpu_embedder(), name, data, lambda m: S.docjob.update(msg=m))
+                S.docjob = {"state": "done", "name": os.path.basename(name)[:120]}
+            except documents.DocError as e:
+                S.docjob = {"state": "error", "name": os.path.basename(name)[:120], "error": str(e)}
+            except Exception as e:
+                S.docjob = {"state": "error", "name": os.path.basename(name)[:120], "error": f"{type(e).__name__}: {e}"}
+        threading.Thread(target=work, daemon=True).start()
+        self._send(202, S.docjob)
+
     def do_POST(self):
         if self.path == "/login":
             return self._login()
+        if self.path.startswith("/documents/upload"):
+            return self._handle(self._upload)
         self._handle(self._post)
 
     def _login(self):
@@ -295,9 +403,16 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/status":
             self._send(200, {"mode": S.mode, "model": S.model, "profile": S.profile,
                              "busy": S.npu_lock.locked(), "index": S.index_info(), "docs": S.docs_info(), "job": S.job,
-                             "gpu_helper": importlib.util.find_spec("torch") is not None,
+                             "gpu_helper": importlib.util.find_spec("torch") is not None, "gpu_assist": S.engine is not None and getattr(S.engine, "g", None) is not None,
+                             "context": getattr(S.engine, "max_ctx", None), "context_limited": getattr(S.engine, "ctx_limited", False),
                              "cloud": bool(__import__("settings").load()["cloud"]["active"]),
-                             "models": sorted(MODELS)})
+                             "models": [m for m in MODELS if os.path.isdir(os.path.join(ROOT, MODELS[m]))]})
+        elif self.path == "/routing":
+            import router
+            self._send(200, {**router.load(), "defaults": router.DEFAULTS})
+        elif self.path == "/documents":
+            import documents
+            self._send(200, {"documents": documents.listing(), "job": S.docjob})
         elif self.path == "/rules":
             import search
             self._send(200, search.rules())
@@ -310,7 +425,7 @@ class H(BaseHTTPRequestHandler):
             raise Bad(404, "not found")
 
     def _post(self):
-        d = self._body()
+        d = self._body(CHAT_BODY if self.path == "/chat" else MAX_BODY)
         if self.path == "/mode":
             set_mode(d.get("mode"), d.get("model"), d.get("device", "npu"))
             self._send(200, {"mode": S.mode, "model": S.model})
@@ -318,9 +433,23 @@ class H(BaseHTTPRequestHandler):
             if d.get("profile") not in PROFILES:
                 raise Bad(400, f"profile must be one of {PROFILES}")
             S.profile = d["profile"]
-            self._send(200, {"profile": S.profile})
+            gpu_now = S.engine is not None and getattr(S.engine, "g", None) is not None
+            self._send(200, {"profile": S.profile, "reload": S.mode == "llm" and gpu_now != (S.profile == "assisted")})   # the loaded model keeps its old setup until reloaded
         elif self.path == "/rules":
             self._send(200, set_rules(d))
+        elif self.path == "/documents/delete":
+            import documents
+            try:
+                documents.delete(str(d.get("id", "")))
+            except documents.DocError as e:
+                raise Bad(400, str(e))
+            self._send(200, {"documents": documents.listing()})
+        elif self.path == "/routing":
+            import router
+            try:
+                self._send(200, router.save(d))
+            except ValueError as e:
+                raise Bad(400, str(e))
         elif self.path == "/settings":
             import settings
             try:
@@ -365,10 +494,11 @@ class H(BaseHTTPRequestHandler):
         backend "local": the NPU model (needs llm mode). backend "cloud": your configured provider (needs no NPU)."""
         import settings
         prompt, n = str(d.get("prompt", "")), int(d.get("tokens", 400))
-        use_docs, use_web, cloud = bool(d.get("docs")), bool(d.get("web")), d.get("backend") == "cloud"
-        history = [{"role": m.get("role"), "content": str(m.get("content", ""))[:6000]} for m in (d.get("history") or [])[-20:] if isinstance(m, dict)]
-        if not prompt.strip() or len(prompt) > MAX_PROMPT or not 1 <= n <= MAX_TOKENS:
-            raise Bad(400, f"prompt 1..{MAX_PROMPT} chars, tokens 1..{MAX_TOKENS}")
+        cloud = d.get("backend") == "cloud"
+        history = [{"role": m.get("role"), "content": str(m.get("content", ""))[:400000]} for m in (d.get("history") or [])[-400:] if isinstance(m, dict)]
+        max_prompt = max(8000, 4 * int(getattr(S.engine, "max_ctx", 4096)))          # about 4 characters per token
+        if not prompt.strip() or len(prompt) > max_prompt or not 1 <= n <= MAX_TOKENS:
+            raise Bad(400, f"prompt 1..{max_prompt} characters (4 per token of the context window), tokens 1..{MAX_TOKENS}")
         cfg = settings.load()
         provider = cfg["cloud"]["providers"].get(cfg["cloud"]["active"]) if cloud else None
         if cloud and not provider:
@@ -377,26 +507,46 @@ class H(BaseHTTPRequestHandler):
             raise Bad(409, "not in llm mode")
         if not cloud and not S.npu_lock.acquire(blocking=False):
             raise Bad(409, "busy")
+        import router
+        rcfg = router.load()
+        auto = router.decide(prompt, rcfg)
         try:
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson")
             self.end_headers()
             try:
+                if not cloud and S.engine is not None:
+                    import search
+                    rl = search.rules()
+                    history, info = compact(history, S.engine.max_ctx, float(rl.get("compact_at", 0.7)), int(rl.get("keep_turns", 3)),
+                                            lambda **kw: self._line({"phase": "compacting", **kw}))
+                    if info:
+                        self._line({"compacted": info})
                 ctx = []
+                if not auto["sure"] and rcfg["classifier"] and not cloud and "auto" in (d.get("docs", "auto"), d.get("web", "auto")):
+                    self._line({"phase": "routing"})        # no rule was sure: ask the local model (one word, 3 tokens)
+                    auto = router.from_label(S.engine.classify(prompt, router.CLASSIFY_SYSTEM, list(router.LABELS)))
+                use_docs, use_web = router.resolve(d.get("docs", "auto"), auto["docs"]), router.resolve(d.get("web", "auto"), auto["web"])
+                import documents
+                use_mine = router.resolve(d.get("mine", "auto"), bool(documents.listing()) and not auto["history"])
+                self._line({"route": {"docs": use_docs, "web": use_web, "mine": use_mine, "reason": auto["reason"], "escalate": router.escalate(prompt)}})
                 if use_docs:
                     self._line({"phase": "docs"})
-                    import docs, search
+                    import docs
                     if S.docs_info() is None:
-                        self._line({"warning": "docs index not built: run `python src/docs.py --device gpu build`"})
+                        if d.get("docs") != "auto":
+                            self._line({"warning": "docs index not built: run `python src/docs.py --device gpu build`"})
                     else:
-                        if S.embedder is None:
-                            S.embedder = search.make_model("cpu")
-                        ctx += [{**c, "kind": "docs"} for c in docs.retrieve(S.embedder, prompt, 4, S.docs)]
+                        ctx += [{**c, "kind": "docs"} for c in docs.retrieve(S.cpu_embedder(), prompt, 4, S.docs)]
+                if use_mine:
+                    import documents
+                    self._line({"phase": "mine"})
+                    ctx = documents.retrieve(S.cpu_embedder(), prompt, 4) + ctx          # your own documents rank first
                 if use_web:
                     self._line({"phase": "web"})
                     import web
                     try:
-                        ctx += web.as_context(web.search(prompt[:200], cfg["web"], cfg["web"]["results"], cfg["web"]["read"]))
+                        ctx += web.as_context(router.clean_web(web.search(router.search_query(prompt, history), cfg["web"], cfg["web"]["results"] + 2, cfg["web"]["read"]))[:cfg["web"]["results"]])
                     except web.WebError as e:
                         self._line({"warning": f"web search failed: {e}"})
                 if ctx:

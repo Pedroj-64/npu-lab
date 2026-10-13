@@ -49,6 +49,11 @@
   .path { color:var(--acc); word-break:break-all; } .score { color:var(--dim); font-size:12px; } .snip { color:var(--dim); font-size:12.5px; word-break:break-word; }
   .bar { height:8px; background:#1f242e; border-radius:5px; overflow:hidden; } .bar i { display:block; height:100%; width:0; background:var(--acc); }
   .warn { color:#e8c06a; font-size:12.5px } label.f { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--dim) }
+  .chip { display:inline-flex; align-items:center; gap:6px; background:#1f242e; border:1px solid var(--line); border-radius:99px; padding:2px 6px 2px 11px; font-size:12.5px }
+  .chip button { background:none; border:0; color:var(--dim); cursor:pointer; font:inherit; padding:0 4px } .chip button:hover { color:var(--bad) }
+  #chatcard { position:relative } #chatcard.drag::after { content:"Drop files to add them to My documents"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(15,17,21,.88); border:2px dashed var(--acc); border-radius:10px; color:var(--acc); font-size:16px; z-index:5 }
+  .pre { display:flex; gap:6px; flex-wrap:wrap } .pre button.on { border-color:var(--acc); color:var(--acc) }
   #toast { position:fixed; bottom:16px; right:16px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 14px; display:none; max-width:420px; z-index:9; }
 </style>
 </head>
@@ -60,8 +65,21 @@
   <div class="card"><h2>System check</h2><div id="doctor" class="dim">checking…</div>
     <div class="row" style="margin-top:10px"><button class="b" id="recheck">Re-check</button></div></div>
   <div class="card"><h2>Resource profile</h2>
-    <label><input type="radio" name="prof" value="npu_only"> <b>NPU only</b> <span class="dim">— the NPU does everything; GPU/CPU helpers are disabled</span></label><br>
-    <label><input type="radio" name="prof" value="assisted"> <b>Assisted</b> <span class="dim">— the first big index may use the GPU (VRAM-capped) or CPU; day-to-day stays on the NPU</span></label>
+    <label><input type="radio" name="prof" value="npu_only"> <b>NPU only</b> <span class="dim">— the NPU does everything (prompt reading too, ~90 tok/s; 4k context); the GPU is never touched</span></label><br>
+    <label><input type="radio" name="prof" value="assisted"> <b>Assisted</b> <span class="dim">— the NPU still generates every token; the GPU also reads prompts (~20x faster), keeps the KV cache and attention (8k+ context), and may speed up indexing</span></label>
+    <div class="row" style="margin-top:12px">
+      <label class="f">GPU memory the model may use (GB)<input type="number" id="vram" min="1" max="6" step="0.5" style="width:90px"></label>
+      <label class="f">Context window (tokens)<input type="number" id="ctxwin" min="2048" max="262144" step="2048" style="width:120px"></label>
+      <label class="f">Document cache on disk (GB, 0 = off)<input type="number" id="scache" min="0" max="100" step="1" style="width:90px"></label>
+      <label class="f">GPU share of decoding (Qwen3.5)<select id="gshare"><option value="0">0% · NPU only</option><option value="0.25">25%</option><option value="0.5">50%</option></select></label>
+      <label class="f">Compact the conversation at (% of window, 0 = off)<input type="number" id="compact" min="0" max="95" step="5" style="width:90px"></label>
+      <button class="b" id="savelimits" style="align-self:flex-end">Save</button>
+      <span class="dim" id="limitnote"></span></div>
+    <div class="dim" style="margin-top:6px;font-size:12.5px">Assisted profile only; applied the next time you Load a model. The KV cache of the window must fit in the GPU memory left after the weights
+      (Qwen3-1.7B: ~114 KB per token, so ~9k tokens in 5.5 GB; the hybrid Qwen3.5 models need ~12 KB per token). The window is cut to what fits and the model state shows the real size.
+      Without the GPU the window is 4096 tokens.
+      GPU share: the GPU computes that fraction of the rows of every Qwen3.5 layer matrix at the same time as the NPU (faster, but the GPU works and draws power; 0% keeps the NPU as the only worker of the weights).
+      It needs NPU kernels built for the share (the System check tells you the command).</div>
     <div class="dim" id="profnote" style="margin-top:8px"></div></div>
 </section>
 
@@ -71,15 +89,18 @@
     <span class="dim" id="llmstate"></span></div>
     <div class="dim" style="margin-top:6px;font-size:12.5px">While a model is loaded it holds the NPU: other programs cannot use it until you unload.</div>
     <div class="warn" id="jobwarn" style="display:none;margin-top:8px"></div></div>
-  <div class="card"><div id="log"></div>
-    <div class="row" style="margin-top:12px"><textarea id="prompt" rows="2" placeholder="Ask something… (Enter to send, Shift+Enter for a new line)"></textarea></div>
+  <div class="card" id="chatcard"><div id="log"></div>
+    <div class="row" style="margin-top:10px" id="docsrow"><button class="b" id="attach" title="PDF, Markdown, text, HTML, Word, images (OCR)">📎 Add documents</button><input type="file" id="fileinp" multiple hidden>
+      <span id="docs" class="pre"></span><span class="dim" id="docjob"></span></div>
+    <div class="row" style="margin-top:8px"><textarea id="prompt" rows="2" placeholder="Ask something… (Enter to send, Shift+Enter for a new line)"></textarea></div>
     <div class="row" style="margin-top:8px">
       <button class="b pri" id="send">Send</button><button class="b" id="stop" disabled>Stop</button><button class="b" id="newchat">New chat</button>
       <select id="backend" title="Where the answer is generated"><option value="local">Local · NPU</option><option value="cloud" disabled>Cloud (set up in Settings)</option></select>
     </div>
     <div class="row" style="margin-top:8px">
-      <label><input type="checkbox" id="usedocs" checked> local docs</label><span class="dim" id="docsinfo"></span>
-      <label><input type="checkbox" id="useweb"> web search</label>
+      <label>local docs <select id="usedocs"><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label><span class="dim" id="docsinfo"></span>
+      <label>web search <select id="useweb"><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label>
+      <label id="minewrap" style="display:none">my documents <select id="usemine"><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label>
       <label id="ctxwrap" style="display:none"><input type="checkbox" id="cloudctx"> also send the excerpts to the cloud</label>
     </div>
     <div class="warn" id="cloudwarn" style="display:none;margin-top:6px">Cloud: your question and this conversation leave your PC and go to the provider you configured. Your files are never sent.</div>
@@ -112,10 +133,23 @@
     </div>
     <div class="row" style="margin-top:10px"><button class="b pri" id="wsave">Save</button><button class="b" id="wtest">Test</button><span class="dim" id="wout"></span></div>
     <div class="dim" style="margin-top:8px;font-size:12.5px">Only your question text is sent to the search provider. The server refuses to fetch anything that points to your local network.</div></div>
+  <div class="card"><h2>Routing (Auto mode)</h2>
+    <div class="dim" style="margin-bottom:8px;font-size:12.5px">Words that decide where a question goes: <code>history</code> (about this chat), <code>fresh</code> (needs the web), <code>terminal</code> (use local docs), <code>programming</code> (answer directly).
+      Each entry is a regular-expression fragment matched as a whole word. With <code>classifier</code> on, the local model decides when no rule matches (costs about a second).</div>
+    <details><summary class="dim" style="cursor:pointer;margin-bottom:8px">Edit the words</summary><textarea id="rjson" rows="10" spellcheck="false"></textarea></details>
+    <div class="row" style="margin-top:8px"><button class="b pri" id="rsave">Save</button><button class="b" id="rreset">Restore defaults</button><span class="dim" id="rout"></span></div></div>
   <div class="card"><h2>Cloud assist (your own API key)</h2>
     <div class="dim" style="margin-bottom:10px;font-size:12.5px">Optional, per message. Works with any OpenAI-compatible endpoint (NVIDIA NIM / Nemotron, OpenRouter, Ollama…) or Gemini.
       Keys are stored only in <code>~/.config/npu-lab/providers.json</code> (readable by your user only) and are never shown again.</div>
-    <div class="row">
+    <div class="pre" id="presets"></div>
+    <div class="row" style="margin-top:10px" id="qrow">
+      <label class="f grow">API key<input type="password" id="qkey" autocomplete="off"></label>
+      <label class="f grow">Model<select id="qmodel"><option value="">(connect to list models)</option></select></label>
+      <button class="b pri" id="qgo" style="align-self:flex-end">Connect</button>
+    </div>
+    <div class="dim" id="qout" style="margin-top:6px;font-size:12.5px"></div>
+    <details style="margin-top:12px"><summary class="dim" style="cursor:pointer">Advanced: custom endpoint, several providers</summary>
+    <div class="row" style="margin-top:10px">
       <label class="f">Saved providers<select id="cprov"></select></label>
       <button class="b" id="cnew">+ New</button>
     </div>
@@ -130,7 +164,7 @@
     </div>
     <div class="row" style="margin-top:10px">
       <button class="b pri" id="csave">Save</button><button class="b" id="clist">List models</button>
-      <button class="b" id="cuse">Use as active</button><button class="b" id="cdel">Remove</button><span class="dim" id="cout"></span></div></div>
+      <button class="b" id="cuse">Use as active</button><button class="b" id="cdel">Remove</button><span class="dim" id="cout"></span></div></details></div>
 </section>
 </main>
 <div id="toast"></div>
@@ -198,7 +232,8 @@ function inline(parent, text) {
 }
 function renderMd(el, src) {                                 // handles unterminated fences too (streaming)
   el.textContent = ""; el.classList.add("md");
-  const lines = src.split("\n"); let i = 0, para = [];
+  const lines = src.replace(/([^\n])```/g, "$1\n```").split("\n"); let i = 0, para = [];   // a fence always starts its own line
+ 
   const flush = () => { if (para.length) { const p = mk("p"); inline(p, para.join("\n")); el.append(p); para = []; } };
   while (i < lines.length) {
     const L = lines[i], fence = /^```\s*([\w+#.-]*)\s*$/.exec(L);
@@ -239,10 +274,10 @@ async function refresh() {
   const assisted = ST.profile === "assisted";
   for (const id of ["dev", "idev"]) for (const o of $(id).options) o.disabled = o.value !== "npu" && !assisted;
   $("profnote").textContent = ST.gpu_helper ? "" : "GPU helper (torch) is not installed; CPU assistance still works.";
-  $("llmstate").textContent = ST.mode === "llm" ? "loaded: " + ST.model : "";
+  $("llmstate").textContent = ST.mode === "llm" ? "loaded: " + ST.model + (ST.gpu_assist ? ` (GPU assist on, ${ST.context} tokens of context${ST.context_limited ? ", limited by GPU memory" : ""})` : ` (NPU only, ${ST.context || 4096} tokens of context)`) : "";
   $("sstate").textContent = ST.mode === "search" ? "loaded on " + ST.model : "";
   $("docsinfo").textContent = ST.docs ? `(${ST.docs.chunks} chunks)` : "(docs index not built — see Setup)";
-  if (!ST.docs) $("usedocs").checked = false;
+  if (!ST.docs) $("usedocs").value = "off";
   $("idxinfo").textContent = `${ST.index.files} files, ${ST.index.chunks} chunks indexed`;
   const j = ST.job || {};
   if (j.state === "running") { const p = j.files_total ? j.files_done / j.files_total : 0; $("idxbar").style.width = (p * 100) + "%";
@@ -268,7 +303,8 @@ async function doctor() {
       if (c.fix) d.append(mk("span", "fix", c.fix)); box.append(d); }
   } catch (e) { box.textContent = e.message; }
 }
-document.querySelectorAll("input[name=prof]").forEach(r => r.onchange = async () => { try { await api("/profile", { profile: r.value }); } catch (e) { toast(e.message); } refresh(); });
+$("savelimits").onclick = async () => { try { await api("/rules", { llm_vram_gb: +$("vram").value, context_tokens: +$("ctxwin").value, compact_at: +$("compact").value / 100, gpu_share: +$("gshare").value, state_cache_gb: +$("scache").value }); $("limitnote").textContent = "saved; Unload and Load the model to apply"; } catch (e) { toast(e.message); } };
+document.querySelectorAll("input[name=prof]").forEach(r => r.onchange = async () => { try { const p = await api("/profile", { profile: r.value }); if (p.reload) toast("Reload the model (Unload, then Load) to apply this profile"); } catch (e) { toast(e.message); } refresh(); });
 $("recheck").onclick = doctor;
 
 // ---------------------------------------------------------------- chat
@@ -276,12 +312,13 @@ $("loadllm").onclick = async () => { $("loadllm").disabled = true; $("llmstate")
   try { await api("/mode", { mode: "llm", model: $("llmsel").value }); toast("Model loaded"); } catch (e) { toast(e.message); } $("loadllm").disabled = false; refresh(); };
 $("unload").onclick = async () => { try { await api("/mode", { mode: "none" }); toast("NPU is free"); } catch (e) { toast(e.message); } refresh(); };
 $("newchat").onclick = () => { HISTORY = []; $("log").textContent = ""; $("stats").textContent = ""; };
-const PHASES = { docs: "Searching local documentation", web: "Searching the web", asking: "Asking the cloud", writing: "Writing" };
-async function send() {
-  const prompt = $("prompt").value.trim(); if (!prompt || abort) return;
-  const cloud = $("backend").value === "cloud";
+const PHASES = { compacting: "Compacting the conversation (summarising old turns)", mine: "Searching your documents", routing: "Deciding where to look", docs: "Searching local documentation", web: "Searching the web", asking: "Asking the cloud", writing: "Writing" };
+async function send(o = {}) {   // o: {prompt, docs, web, cloud} re-asks the same question with another source choice
+  const prompt = o.prompt || $("prompt").value.trim(); if (!prompt || abort) return;
+  const cloud = o.cloud ?? $("backend").value === "cloud";
+  if (o.prompt && HISTORY.length >= 2 && HISTORY[HISTORY.length - 2].content === prompt) HISTORY.splice(-2);
   if (!cloud && (!ST || ST.mode !== "llm")) { toast("Load a model first (or choose Cloud)"); return; }
-  $("prompt").value = ""; const me = mk("div", "msg me", prompt); $("log").append(me);
+  if (!o.prompt) $("prompt").value = ""; const me = mk("div", "msg me", prompt); $("log").append(me);
   const box = mk("div", "msg bot"), srcs = mk("div", "src"), phase = mk("div", "phase"), body = mk("div");
   box.append(phase, srcs, body); $("log").append(box); $("log").scrollTop = 1e9;
   const msg = { text: "", think: "", body, done: false };
@@ -290,25 +327,32 @@ async function send() {
   let raf = 0; const draw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderMsg(msg); $("log").scrollTop = 1e9; }); };
   try {
     const r = await fetch("/chat", { method: "POST", signal: abort.signal, headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, tokens: 600, history: HISTORY.slice(-12), backend: cloud ? "cloud" : "local", docs: $("usedocs").checked, web: $("useweb").checked, cloud_context: $("cloudctx").checked }) });
+      body: JSON.stringify({ prompt, tokens: 600, history: HISTORY, backend: cloud ? "cloud" : "local", docs: o.docs ?? $("usedocs").value, mine: o.mine ?? $("usemine").value, web: o.web ?? $("useweb").value, cloud_context: $("cloudctx").checked }) });
     if (!r.ok) throw new Error((await r.json()).error || r.statusText);
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) { const { done, value } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });
       let i; while ((i = buf.indexOf("\n")) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line) continue;
         const m = JSON.parse(line);
         if (m.phase) setPhase(m.phase === "reading" ? `Reading ${m.tokens} tokens` : (PHASES[m.phase] || m.phase) + (m.provider ? " (" + m.provider + ")" : ""));
+        if (m.route) { const u = [m.route.mine && "my documents", m.route.docs && "docs", m.route.web && "web"].filter(Boolean); const rl = mk("div", "src", "used: " + (u.join(" + ") || "no sources") + " (" + m.route.reason + ") ");
+          const act = (t, o2) => { const b = mk("button", "b", t); b.onclick = () => { abort ? toast("Wait for the answer to finish") : send({ prompt, ...o2 }); }; rl.append(b, " "); };
+          if (!cloud) { if (u.length) act("answer without searching", { docs: "off", web: "off", mine: "off" }); else act("search anyway", { docs: "on", web: "on", mine: "on" }); }
+          if (!cloud && m.route.escalate && ST && ST.cloud) act("ask the cloud", { cloud: true });
+          box.insertBefore(rl, srcs); }
+        if (m.compacted) { HISTORY = [{ role: "user", content: "[Notes of the earlier conversation]\n" + m.compacted.summary }, { role: "assistant", content: "Understood, I will use those notes." }, ...HISTORY.slice(-m.compacted.kept)];
+          box.insertBefore(mk("div", "src", "Conversation compacted: older turns were summarised so the window stays free."), body); }
         if (m.warning) { box.insertBefore(mk("div", "warn", m.warning), body); }
         if (m.sources) { srcs.textContent = "sources: "; m.sources.forEach((s, k) => { if (k) srcs.append(", "); if (s.url && /^https?:/.test(s.url)) { const a = mk("a", "", s.src); a.href = s.url; a.target = "_blank"; a.rel = "noopener noreferrer"; srcs.append(a); } else srcs.append(s.src); }); }
         if (m.think) { msg.think += m.think; setPhase("Thinking"); draw(); }
         if (m.token) { if (!msg.text) setPhase(""); msg.text += m.token; draw(); }
         if (m.error) toast(m.error);
-        if (m.done) { const s = m.stats || {}; $("stats").textContent = s.backend === "cloud" ? `cloud · ${s.seconds}s` : `${(s.decode_tokens / Math.max(s.decode_s, 1e-9)).toFixed(1)} tok/s · prompt ${s.prefill_tokens} tokens read in ${s.prefill_s.toFixed(1)} s`; } } }
+        if (m.done) { const s = m.stats || {}; $("stats").textContent = s.backend === "cloud" ? `cloud · ${s.seconds}s` : `${(s.decode_tokens / Math.max(s.decode_s, 1e-9)).toFixed(1)} tok/s · prompt ${s.prefill_tokens} tokens (${s.reused_tokens || 0} reused) read in ${s.prefill_s.toFixed(1)} s`; } } }
   } catch (e) { if (e.name !== "AbortError") toast(e.message); }
   msg.done = true; setPhase(""); renderMsg(msg);
   if (msg.text) HISTORY.push({ role: "user", content: prompt }, { role: "assistant", content: msg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim() });
   abort = null; $("send").disabled = false; $("stop").disabled = true; refresh();
 }
-$("send").onclick = send; $("stop").onclick = () => abort && abort.abort();
+$("send").onclick = () => send(); $("stop").onclick = () => abort && abort.abort();
 $("prompt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
 
 // ---------------------------------------------------------------- search
@@ -338,7 +382,43 @@ function renderSettings() {
   names.forEach(n => sel.append(new Option(n + (n === SET.cloud.active ? "  (active)" : ""), n)));
   if (names.length) { sel.value = names.includes(sel.value) ? sel.value : (SET.cloud.active || names[0]); fillCloud(sel.value); } else fillCloud("");
 }
-async function loadSettings() { try { SET = await api("/settings"); renderSettings(); } catch (e) { toast(e.message); } }
+const PRESETS = {
+  nvidia: { label: "NVIDIA NIM", kind: "openai", base_url: "https://integrate.api.nvidia.com/v1", keyUrl: "build.nvidia.com" },
+  openrouter: { label: "OpenRouter", kind: "openai", base_url: "https://openrouter.ai/api/v1", keyUrl: "openrouter.ai/keys" },
+  openai: { label: "OpenAI", kind: "openai", base_url: "https://api.openai.com/v1", keyUrl: "platform.openai.com/api-keys" },
+  gemini: { label: "Google Gemini", kind: "gemini", base_url: "", keyUrl: "aistudio.google.com/apikey" },
+  ollama: { label: "Ollama (this PC)", kind: "openai", base_url: "http://localhost:11434/v1", keyUrl: "" },
+};
+let QP = "";
+function pickPreset(id) {
+  QP = id; [...$("presets").children].forEach(b => b.classList.toggle("on", b.dataset.p === id));
+  const p = PRESETS[id], saved = (SET?.cloud.providers || {})[id];
+  $("qrow").style.display = ""; $("qkey").style.display = id === "ollama" ? "none" : ""; $("qkey").value = "";
+  $("qkey").placeholder = saved?.has_key ? "saved — leave empty to keep" : "paste your key";
+  $("qout").textContent = p.keyUrl ? `Get a key at ${p.keyUrl}. It is stored only on this PC.` : "No key needed; Ollama must be running.";
+  $("qmodel").textContent = ""; $("qmodel").append(new Option(saved?.model || "(connect to list models)", saved?.model || ""));
+}
+for (const [id, p] of Object.entries(PRESETS)) { const b = mk("button", "b", p.label); b.dataset.p = id; b.onclick = () => pickPreset(id); $("presets").append(b); }
+$("qrow").style.display = "none";
+$("qgo").onclick = async () => {
+  if (!QP) { toast("Pick a service first"); return; }
+  const p = PRESETS[QP]; $("qgo").disabled = true; $("qout").textContent = "connecting…";
+  try {
+    SET = await api("/settings", { cloud: { providers: { [QP]: { kind: p.kind, base_url: p.base_url, model: $("qmodel").value, key: $("qkey").value } }, active: QP } });
+    const { models } = await api("/settings/models", { provider: QP }), cur = $("qmodel").value;
+    $("qmodel").textContent = ""; models.forEach(m => $("qmodel").append(new Option(m, m)));
+    $("qmodel").value = models.includes(cur) ? cur : models.find(m => /flash|mini|haiku|small|instant/i.test(m) && !/lite|preview|exp|thinking|vision/i.test(m)) || models[0] || "";   // a fast, cheap default
+    SET = await api("/settings", { cloud: { providers: { [QP]: { kind: p.kind, base_url: p.base_url, model: $("qmodel").value } } } });
+    $("qout").textContent = `Connected · ${models.length} models · using ${$("qmodel").value} (change it above and press Connect again)`; $("qkey").value = "";
+    renderSettings(); await refresh();
+  } catch (e) { $("qout").textContent = e.message; }
+  $("qgo").disabled = false;
+};
+let RDEF = {};
+const showRouting = r => { RDEF = r.defaults; delete r.defaults; $("rjson").value = JSON.stringify(r, null, 1); };
+async function loadSettings() { try { SET = await api("/settings"); renderSettings(); showRouting(await api("/routing")); } catch (e) { toast(e.message); } }
+$("rsave").onclick = async () => { try { showRouting({ ...(await api("/routing", JSON.parse($("rjson").value))), defaults: RDEF }); toast("Saved"); } catch (e) { toast(e.message); } };
+$("rreset").onclick = async () => { try { showRouting({ ...(await api("/routing", { ...RDEF, classifier: false })), defaults: RDEF }); toast("Defaults restored"); } catch (e) { toast(e.message); } };
 $("cprov").onchange = () => fillCloud($("cprov").value);
 $("cnew").onclick = () => { $("cprov").value = ""; fillCloud(""); $("cname").focus(); };
 $("wsave").onclick = async () => { try { SET = await api("/settings", { web: { provider: $("wprov").value, searxng_url: $("wsx").value, brave_key: $("wbrave").value, results: +$("wn").value || 4 } }); $("wbrave").value = ""; renderSettings(); toast("Saved"); } catch (e) { toast(e.message); } };
@@ -353,13 +433,42 @@ $("cdel").onclick = async () => { const n = $("cprov").value; if (!n || !confirm
 $("clist").onclick = async () => { const n = $("cprov").value; if (!n) { toast("Save the provider first"); return; } $("cout").textContent = "asking the provider…";
   try { const { models } = await api("/settings/models", { provider: n }); const dl = $("cmodels"); dl.textContent = ""; models.forEach(m => dl.append(new Option(m))); $("cout").textContent = models.length + " models (click the Model field to pick)"; } catch (e) { $("cout").textContent = e.message; } };
 
+// ---------------------------------------------------------------- my documents
+let DOCS = [];
+function renderDocs(job) {
+  const box = $("docs"); box.textContent = "";
+  DOCS.forEach(d => { const c = mk("span", "chip", `${d.name} · ${d.pages} p.${d.ocr ? " · OCR" : ""}`), x = mk("button", "", "×"); x.title = "Remove"; x.onclick = async () => { DOCS = (await api("/documents/delete", { id: d.id })).documents; renderDocs(); }; c.append(x); box.append(c); });
+  $("minewrap").style.display = DOCS.length ? "" : "none";
+  $("docjob").textContent = job && job.state === "running" ? `Reading ${job.name}: ${job.msg || ""}…` : "";
+}
+async function pollDocs() {
+  for (;;) { const r = await api("/documents"); DOCS = r.documents; renderDocs(r.job);
+    if (r.job.state !== "running") { if (r.job.state === "error") toast(`${r.job.name}: ${r.job.error}`); return; }
+    await new Promise(f => setTimeout(f, 700)); }
+}
+async function uploadDocs(files) {
+  for (const f of files) {
+    const r = await fetch("/documents/upload?name=" + encodeURIComponent(f.name), { method: "POST", headers: { "Authorization": "Bearer " + TOKEN }, body: f });
+    if (!r.ok) { toast(((await r.json().catch(() => ({}))).error) || r.statusText); continue; }
+    await pollDocs();
+  }
+}
+$("attach").onclick = () => $("fileinp").click();
+$("fileinp").onchange = e => { uploadDocs([...e.target.files]); e.target.value = ""; };
+let dragDepth = 0;
+addEventListener("dragenter", e => { if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) { dragDepth++; $("chatcard").classList.add("drag"); } });
+addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("chatcard").classList.remove("drag"); } });
+addEventListener("dragover", e => e.preventDefault());                    // without this the browser would open the file instead
+addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("chatcard").classList.remove("drag");
+  if (e.dataTransfer.files.length) { show("chat"); uploadDocs([...e.dataTransfer.files]); } });
+
 (async function init() {
   await login();
   if (!TOKEN) { $("pill").textContent = "not signed in"; toast("Open the address printed by the launcher (its login link works once)."); return; }
   show("setup");
-  try { const s = await api("/status"); for (const m of s.models) $("llmsel").append(new Option(m === "qwen" ? "Qwen2.5-0.5B (fast)" : m === "qwen15" ? "Qwen2.5-1.5B (better)" : m, m));
-    $("roots").value = (await api("/rules")).roots.join("\n"); } catch (e) { toast(e.message); }
-  await loadSettings(); doctor(); refresh(); setInterval(refresh, 1500);
+  try { const s = await api("/status"); for (const m of s.models) $("llmsel").append(new Option(({ qwen35s: "Qwen3.5-0.8B · fast (Assisted)", qwen35m: "Qwen3.5-2B · medium (Assisted)", qwen35l: "Qwen3.5-4B · quality, slow (Assisted)", qwen3: "Qwen3-1.7B · medium (NPU only ok)", qwen3s: "Qwen3-0.6B · fast (NPU only ok)" })[m] || m, m)); $("llmsel").value = s.models.includes("qwen35m") ? "qwen35m" : s.models.includes("qwen3") ? "qwen3" : s.models[0];
+    { const rl = await api("/rules"); $("roots").value = rl.roots.join("\n"); $("vram").value = rl.llm_vram_gb ?? 4.0; $("ctxwin").value = rl.context_tokens ?? 80000; $("compact").value = Math.round((rl.compact_at ?? 0.7) * 100); $("gshare").value = String(rl.gpu_share ?? 0); $("scache").value = rl.state_cache_gb ?? 8; } } catch (e) { toast(e.message); }
+  await loadSettings(); doctor(); refresh(); pollDocs().catch(() => {}); setInterval(refresh, 1500);
 })();
 </script>
 </body>

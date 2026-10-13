@@ -16,5 +16,6 @@ Nothing below is redistributed in this repository; check each license before reu
 
 - mlir-aie / IRON and the `llvm-aie` (Peano) compiler: Apache-2.0 with LLVM exception.
 - XRT and the `amdxdna` driver: Apache-2.0 / GPL-2.0 (kernel module).
-- Qwen2.5-0.5B-Instruct and Qwen2.5-1.5B-Instruct: Apache-2.0 (the 3B and 72B sizes use other licenses).
+- Qwen3-0.6B and Qwen3-1.7B (also Qwen3-4B/8B): Apache-2.0.
 - paraphrase-multilingual-MiniLM-L12-v2 and all-MiniLM-L6-v2: Apache-2.0.
+- The Gated DeltaNet chunked scan in `src/gpu_qwen35.py` is adapted from Hugging Face transformers (`modeling_qwen3_5.py`): Apache-2.0, Copyright The Qwen team and The HuggingFace Inc. team.
