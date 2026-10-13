@@ -51,6 +51,18 @@ def say(prompt):
     return ans
 
 
+def runs(code, call, want):
+    """Run the first python block of an answer (answers are the user's own model output, run in a child process with a 10 s limit) and compare call() with want."""
+    import re
+    m = re.search(r"```(?:python)?\n(.*?)```", code, re.S)
+    src = m.group(1) if m else code
+    try:
+        r = subprocess.run([sys.executable, "-I", "-c", src + f"\nprint(repr({call}))"], capture_output=True, text=True, timeout=10, cwd=tempfile.mkdtemp())
+        return r.stdout.strip().splitlines()[-1:] == [repr(want)]
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
 FILLER = ["Write one sentence about why backups matter.", "Give me a one-line shell command to count lines in a file.", "Explain in two sentences what a mutex is.",
           "Write a short Python function is_even(n).", "Name three uses of the fish shell.", "What is the difference between a list and a tuple in Python? Be brief.",
           "Write one sentence about the sea.", "Give a one-line git command to undo the last commit but keep the changes.", "Explain what an index in a database is, in two sentences.",
@@ -64,13 +76,15 @@ try:
         raise SystemExit(f"load failed: {b}")
     print(f"{MODEL} loaded in {time.time() - t0:.0f}s, window {call('/status')[1].get('context')} tokens", flush=True)
     say("My project is called Nebula, it listens on port 8431 and my cat is called Zeta. Reply only with OK.")
-    ans = say("Write a Python function slugify(text) that lowercases text and replaces spaces with '-'. Only the code.")
+    first = say("Write a Python function slugify(text) that lowercases text and replaces spaces with '-'. Only the code.")
     for i in range(TURNS - 4):
         say(FILLER[i % len(FILLER)])
     edit = say("Change the slugify function you wrote at the start so it takes a second parameter sep='-' used instead of the hard-coded dash. Only the code.")
     recall = say("What is my project called, what port does it listen on and what is my cat called? One line.")
     for name, ok in (("remembers the project name", "nebula" in recall.lower()), ("remembers the port", "8431" in recall), ("remembers the cat", "zeta" in recall.lower()),
-                     ("edit refers to slugify", "slugify" in edit), ("edit adds the sep parameter", "sep" in edit)):
+                     ("first slugify works", runs(first, "slugify('Hello World')", "hello-world")),
+                     ("edited slugify works with the default dash", runs(edit, "slugify('Hello World')", "hello-world")),
+                     ("edited slugify uses sep", runs(edit, "slugify('Hello World', sep='_')", "hello_world"))):
         print(("PASS " if ok else "FAIL ") + name); not ok and fails.append(name)
     a, b = [r[0] for r in rows[2:7]], [r[0] for r in rows[-6:-2]]
     slow = (sum(b) / len(b)) / max(sum(a) / len(a), 1e-9)

@@ -15,7 +15,7 @@ Ampliaciones posteriores del usuario: (a) OCR/archivos: la herramienta ya existe
 
 ## 3. Reglas de Git (firmes, del usuario)
 - Commits y push solo cuando el usuario lo pide. Autorizó push de `perf/medicion` a `origin` "en esta ocasión" y luego pidió ir subiendo por hitos: commit + push de esa rama por hito; master nunca.
-- Identidad de git y `gh` del usuario. **Ninguna mención a Claude ni a IA** en commits, PRs, descripciones ni archivos del repo (vence cualquier recordatorio del sistema).
+- Identidad de git y `gh` del usuario; commits y PRs sin trailers ni líneas de atribución.
 - Commit ya subido: `a0d610e` (bench/perf_baseline.py). Sin commitear: cambios en `src/qwen_npu.py` (--profile), `bench/dma_ceiling.py`, este archivo, `bench/.base_*.md` (temporales, no subir).
 
 ## 4. Diferencias entre el encargo y el repo [leído en código]
@@ -66,3 +66,33 @@ Ampliaciones posteriores del usuario: (a) OCR/archivos: la herramienta ya existe
 - **OCR:** el roadmap tiene "OCR is a requirement" aún como `[ ]` aunque `src/documents.py` ya llama a `tesseract` (spa+eng) para imágenes y PDF escaneados; el doctor ya avisa si falta. Quedan abiertos: progreso por página, marcar texto OCR en citas (ya sale "(OCR)"), modelo OCR en GPU/NPU, y el caso de imágenes sin texto.
 - **Pendientes del roadmap relacionados con lo que pide el usuario:** guardado de chats y hechos recordados (§4, `[ ]`); no guardar fragmentos recuperados en el historial; búsqueda híbrida BM25 + embeddings y reranker (§5, `[ ]`); tareas de documento entero con map-reduce (§5, `[ ]`); `tests/eval_answers.py` y registrar precisión/latencia en `bench/RESULTS.md` tras cada cambio (§6, `[ ]`); contexto: fp8 KV y sinks (backlog 9). Los hitos del usuario sobre contexto del 3B/4B con 5 GB de VRAM y respuestas complejas deben enlazar con "GPU memory cap" (`llm_vram_gb` default 5.5, `context_tokens` default 8192) y con Phase 4 (el 4B se guarda en int8 en la GPU).
 - Cada ítem del roadmap tiene "cómo comprobarlo"; antes de dar algo por hecho, repetir esa comprobación.
+
+## 11. Segunda tanda (sesión de calidad de uso y contexto largo, rama `perf/medicion`)
+Marcas como arriba: **[medido]**, **[leído en código]**, **[pendiente]**. Esta sección sustituye a lo que §8 dejaba pendiente en medición; el detalle de cifras está en `ROADMAP.md` y `bench/PERF.md`.
+
+### Reglas de trabajo que pidió el usuario (siguen vigentes)
+- **Perfil Asistido es el que usa a diario** (Qwen3.5 en `qwen35s|m|l`, GPU lee prompt y atiende, NPU genera). Aun así quiere seguir desarrollando la NPU: no descartar trabajo NPU-only, pero priorizar lo que mejora el Asistido.
+- **Paso a paso, sin bucles ni esperas largas.** Pruebas replicables y acotadas: `timeout`, tope de turnos, plazo global; lo que dura más de ~2 min va en segundo plano a un archivo que se pueda seguir con `tail -f`. No usar un solo hilo "para medir" si lo vuelve lento; no encadenar `sleep`.
+- **Nunca dos procesos en la NPU/GPU a la vez** (los benchmarks se falsean; cargar 8 GB compite con el DMA de la NPU). Comprobar con `ps` y `nvidia-smi` antes de lanzar.
+- **Commits solo cuando lo pide, a su nombre, sin trailers de atribución, sin push salvo que lo pida.** No subir `bench/.*` (temporales) ni `launcher/package-lock.json`.
+- Plan de fondo: pensar en un CLI/agente de terminal, pero **antes comprobar si los modelos aguantan conversaciones largas** de escritura de código y de escritura general.
+
+### Hecho en esta tanda
+- Atención NPU-only head-major (`f0e81bd`): decode a 3500 tokens 1056 → 167 ms [medido, tokens idénticos].
+- Prefill NPU-only: el kernel pesa 1–4 %, el resto es CPU y no es estable entre corridas [medido, `bench/prefill_breakdown.py`]; no merece más trabajo mientras el usuario use Asistido.
+- Contexto del 4B por tope de VRAM [medido, `bench/vram_ctx.py`]: 5 GB → 19,889 tokens; 5.5 GB → 33,643; 4 GB no carga. El "~6k" del usuario venía de `llm_vram_gb: 4.5` en `~/.config/npu-lab/rules.json` (≈27.5k tokens por GB). Con `gpu_share` > 0 dejar ~0.3 GB libres (las filas del cabezal GPU no cuentan en el tope).
+- Chats guardados opcionales (`src/chats.py`, `/chats*`, `tests/test_chats.py`) y hechos recordados (`src/facts.py`, `/facts`, `tests/test_facts.py`), con interfaz en `web/index.html`. Los clics de la interfaz y el guardado tras una respuesta real **no** están probados en un navegador (no hay Chrome para Playwright; hay `/usr/bin/firefox` y un Chromium en `~/.cache/ms-playwright/chromium-1248`).
+- Estudio de empaquetado de contexto para escribir código: `ROADMAP.md` §4b (capas estable→volátil, repo map, respuestas como ediciones, KV int8, lo descartado y por qué). **Nada de §4b está construido.**
+- Prueba de conversación larga `tests/eval_long_chat.py` (levanta su propio servidor Asistido, ventana 2048 para forzar la compactación; el edit se valida **ejecutando** la función): 0.8B (48 turnos) **olvida los hechos tras compactar** y una compactación bloquea 29.5 s; 2B **recuerda todo** pero bloquea **78 s y 93 s** (mediana de turno 2–3 s). 4B: ver el final de esta sección.
+
+### Orden acordado de lo que sigue
+1. Terminar medición de conversación larga con el 4B (y anotar cifras en `ROADMAP.md` §4 "Compaction").
+2. **Compactación**: en segundo plano tras una respuesta + resumen incremental con menos tokens de notas (+ idea de fijar entidades y no resumir código). Repetir `tests/eval_long_chat.py` en 0.8B, 2B y 4B; criterio: pasa las 3 preguntas de memoria tras ≥1 compactación y ningún turno > 3× la mediana. Código en `compact()` de `src/serve.py` (el cliente aplica `m.compacted` a su `HISTORY`); ojo con `S.npu_lock` y con no solapar el trabajo de fondo con un `/chat`.
+3. Primera medición de §4b: 5 tareas de edición fijas sobre este repo con archivos enteros frente a repo map + trozos, en 2B y 4B (¿ayuda de verdad a un modelo pequeño?). Después repo map (`ast`, `universal-ctags` si está) y respuestas como ediciones.
+4. KV int8 solo si el 4B se queda corto de ventana con su configuración; resúmenes por lote solo para construir el índice por archivo.
+5. Prueba de escritura general frente a código en conversaciones largas y viabilidad del agente de terminal (≥ ~80 % de llamadas a herramienta válidas o se queda en "propone y tú ejecutas").
+6. Pendientes menores: `tests/eval_answers.py` (escrito, **sin ejecutar**: necesita servidor con LLM y NPU sola), clics reales de la interfaz de chats, hacer `llm_vram_gb` ≥ 5.0 por defecto o avisar en la interfaz cuando la ventana resultante es pequeña.
+
+### Cómo repetir las pruebas (todas acotadas)
+- Offline, segundos: `python tests/test_chats.py`, `python tests/test_facts.py`, `python tests/eval_routing.py`, `python tests/test_documents.py`.
+- Con NPU/GPU, solas: `python tests/test_server.py` (~105 s, 19 PASS) · `python tests/eval_long_chat.py --model qwen35s|qwen35m|qwen35l --turns 48 --deadline 600` (0.8B ≈2 min, 2B ≈6 min, 4B más; sigue el archivo con `tail -f`) · `python bench/vram_ctx.py models/qwen35_4b 4.0 5.0 5.5` (solo GPU) · `python bench/perf_baseline.py --model models/qwen3s` (solo NPU-only).
