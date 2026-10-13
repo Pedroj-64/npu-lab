@@ -8,6 +8,11 @@ so everything here is built from the low-level pieces.
 ## What works
 - **Local LLM chat with the NPU generating every token** (Qwen3 / Qwen3.5, 0.6B to 4B), optional GPU assistance for long context, documents,
   local docs and web search: see Quick start and Modes below.
+- **Agent mode** (project folder + "agent mode" in the Chat tab, or the terminal chat `python src/chat_cli.py --model qwen35l --project DIR --agent`):
+  the model proposes ONE action per reply (read, list, edit, create, delete); reads run alone, anything that writes shows a preview and waits
+  for your click (or y/N in the terminal); deletes go to a recoverable trash in `~/.local/share/npu-lab/trash/`. With the 4B, 94% of the calls were
+  valid but only 3-4 of 5 test tasks were solved and a false "DONE" still happens, so it is a confirm-each-step helper, not an autonomous agent
+  (numbers in `ROADMAP.md` 4d). The web clicks and the terminal chat have not been tried yet with the real 4B.
 - `bench/matmul_npu.py`: int16 matmul on the NPU vs numpy on the CPU (up to ~1.4 TOPS at 1024^3).
 - `src/minilm.py` + `src/npu_linear.py`: all-MiniLM-L6-v2 sentence embeddings in numpy,
   with every dense layer offloaded to the NPU. Embeddings match the CPU ones (cosine >= 0.996).
@@ -130,11 +135,12 @@ The NPU is the center of the project; GPU/CPU are optional helpers, never requir
 8. Optional: local documentation index (`python src/docs.py --device gpu build`, after `tldr --update`).
 
 ## Status
-Usable day to day on the tested machine (Ryzen 5 8645HS + RTX 3050 6 GB, Linux): chat with five models, long context (80k tokens by default), documents,
-local docs, web search, optional cloud assist. Known limits: Linux only, XDNA1 only, the Assisted profile needs an NVIDIA GPU with CUDA,
+Usable day to day on the tested machine (Ryzen 5 8645HS + RTX 3050 6 GB, Linux): chat with five models, long context (80k tokens by default; with the 4B
+the 6 GB card holds about 22k tokens, the GPU budget is now capped automatically so a value that is too high no longer runs out of memory), documents,
+local docs, web search, optional cloud assist, agent mode with confirmation. Known limits: Linux only, XDNA1 only, the Assisted profile needs an NVIDIA GPU with CUDA,
 OCR needs `tesseract`, kernels must be built per model (and per GPU share) on your machine.
 
-See [`ROADMAP.md`](ROADMAP.md) for what is next (per-question routing for docs/web, better memory, evaluation).
+See [`ROADMAP.md`](ROADMAP.md) for what is next (per-question routing for docs/web, better memory, evaluation, int8 KV / int4 weights to fit more context in 6 GB).
 
 License: MIT.
 
