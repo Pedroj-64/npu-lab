@@ -15,6 +15,11 @@ Target: three usable models: **fast** (Qwen3-0.6B, then Qwen3.5-0.8B), **medium*
 - [x] **Phase 4, the 4B profile**: weights that do not fit in VRAM are streamed layer by layer from RAM at 12.5 GB/s for prefill (4.2 GB int8 = ~0.35 s per pass). **Done differently:** the GPU keeps the 4B in int8 (with the same quantisation as the NPU), no layer streaming needed.
 - [~] **Phase 5, set defaults**: the fast / medium / slow selector is done; still open: router classifier on by default (Qwen3.5 as judge, re-measure) and the reranker on the GPU.
 
+## Open questions for the next session (Oct 2026, branch `perf/medicion`)
+- **NPU-only attention** (head-major KV cache, no float64 copy per layer): Qwen3-0.6B decode per token at 256 / 1024 / 3500 tokens of context went 99 / 290 / 1056 ms -> 59 / 83 / 167 ms (`bench/attn_vs_ctx.py`). `tests/test_server.py` passes (19 PASS). Still to confirm: identical tokens (`bench/token_equiv.py`) and the same on Qwen3-1.7B. Only matters for the NPU-only profile (4096-token window); the Assisted profile already attends on the GPU.
+- **Why the 4B holds only ~6k tokens with 5 GB of VRAM: measured with `bench/vram_ctx.py` (GPU free, 28 MiB in use), Qwen3.5-4B, int8 layers 3.65 GB, 32,768 bytes of KV per token:** budget 4 GB -> does not fit (0 tokens); **5 GB -> 19,889 tokens**; **5.5 GB -> 33,643 tokens**. **Explained:** the saved settings (`~/.config/npu-lab/rules.json`) have `llm_vram_gb: 4.5`, not 5, and the table grows ~27.5k tokens per GB, so 4.5 GB gives ~6.1k tokens (19,889 - 13,754), the number seen in use. It is the setting, not the engine: raising it to 5.0 gives ~20k and 5.5 gives ~33k. The same file has `gpu_share: 0.5`, and the share's output-head rows (`lm_tail`, ~0.3 GB for the 4B) are allocated after the window is computed, so they are not counted in the budget: leave ~0.3 GB of the 6 GB card free when the share is on. The budget is a cap on this process, not a reservation: other programs on the GPU can still make a load fail. To check once on the server: set 5.5, Load the 4B, compare the window in the model state and `nvidia-smi` with this table.
+- Prefill cause on NPU-only (187 tok/s at 256 tokens -> 141 at 2048), cost of changing instruction buffers (~410 us is quoted, never measured), and whether `--fuse-proj` is needed at all (qkv and gate|up are already concatenated in decode).
+
 ## Optimization backlog (Oct 2026): squeezing NPU, GPU and CPU
 Where one decoded token goes today (Qwen3.5-2B, ~125 ms): ~90 ms the NPU streaming 1.9 GB of int8 weights (~21 GB/s), ~170 NPU calls per token (~120 us fixed each, ~20 ms), GPU conv/recurrence/attention steps with a ~20 us round trip per layer, numpy glue on the CPU (norms, SiLU, concatenations). The NPU kernel is within ~1.5x of its int16 multiply-accumulate floor, so more bytes per second will not come from the NPU alone.
 Ranked by expected gain per effort (estimates, not measurements, except where marked):
@@ -83,10 +88,29 @@ Goal: remember more without getting slower or running out of window.
   - Decode: every token scans the whole cache (~1.9 GB of fp32 per token at 16k): fp16/int8 KV and attention on GPU, or the decode slows well below today's 5 tok/s.
   - RoPE: Qwen3 is trained to 32k (40960 positions); beyond that YaRN scaling would be needed.
   - Pragmatic plan: raise `max_ctx` step by step (8k, then 16k) with fp16 KV and GPU prompt attention, measure tokens/s and RAM at each step, and keep **retrieval + map-reduce over documents** (section 5) for anything bigger than the window, since reading 100k tokens at 76 tok/s is not realistic.
-- [ ] **Saved chats** (opt-in, local): list, resume, delete, export. Nothing is stored unless you turn it on.
+- [x] **Saved chats** (opt-in, local; `src/chats.py`, `/chats*`, switch "save chats on this PC" in the chat card, off by default): one JSON file per chat in `~/.local/share/npu-lab/chats`, list, open, delete, export to Markdown; saved after each answer. Stored on the server, not in the browser, because the port changes on every launch. `tests/test_chats.py` (offline, ~3 s) passes; the page renders the list in headless Chromium; the Open/Delete/Export clicks and the save after a real answer are not yet tested in a browser.
 - [ ] **Remembered facts** (opt-in, local, editable): short notes such as "I use CachyOS" that are added to the prompt; you see and control them.
 - [ ] Do not keep retrieved excerpts in the history (they bloat it); keep only the list of sources.
 - Check: a 30-turn chat answers a question about turn 2 correctly, and turn 30 is not slower than turn 5.
+
+## 4b. Long context for writing code: pack it, do not just fit it (study of Oct 2026, nothing built yet)
+Why: for Qwen3.5 the window already fits (2B: 101k tokens read, 7.8 tok/s decode). What hurts when writing code is (1) reading 100k tokens takes ~90 s, (2) writing code at ~8 tok/s, (3) a 2-4B model gets worse the more irrelevant tokens it has in front. So the goal is fewer, more stable, more relevant tokens, which also means less NPU/GPU load and heat. Sources are mostly secondary (blogs, third-party benchmarks) and none measures small models on code: treat their numbers as indicative and run the checks below.
+
+**Method: a layered prompt, from stable to volatile** (prefix reuse and `statecache.py` only save what does not change from the start):
+1. Stable prefix, cached on disk: instructions + repo map + pinned files. Changing anything here invalidates everything after it.
+2. Relevant to the task: files/chunks found by the question (hybrid BM25 + embeddings, section 5); files to edit in full, the rest as signatures only.
+3. Conversation notes (`compact`).
+4. The current question, last.
+
+- [ ] **Repo map** (best effort/gain): symbols and who uses them, ranked by relevance to the question and cut to a token budget (aider's default is ~1k tokens: [pattern](https://www.agentpatterns.ai/context-engineering/repository-map-pattern/)). Python with stdlib `ast`; other languages with `universal-ctags` if installed (no new dependency like tree-sitter unless ctags is not enough). ~100 lines + a test. Check: the map of this repo fits the budget and lists `documents.extract`, `Qwen.step`, `StateCache.save`.
+- [ ] **Answer with edits, not whole files**: search/replace blocks or diffs. Decode is the expensive part, editing 10 lines costs far less than rewriting 300. Check: apply the block to a test file; reject and say so when the search text is not found.
+- [ ] **Stable prefix really reused**: measure the `statecache` hit between two different questions about the same project (read `serve.py` first: a turn that injects excerpts re-reads from that turn on). Check: second question reads in about a second.
+- [ ] **One-line summary per file**, stored on disk by content hash, redone only for changed files. Built with batches of independent summaries (the 4-vector kernel measured 1.7x cheaper per vector; useful for building the index, not for one chat). Check: re-indexing an unchanged project costs 0 model calls.
+- [ ] **Read on demand** (the model asks for a file with a tool instead of getting everything): depends on a 2-4B model calling tools reliably; decide it from the agent feasibility test (below), do not assume.
+- [ ] **Int8 KV with a scale per head** for the full-attention layers (backlog 9). Only worth it when the KV limits the window (4B: ~32 KB per token of KV, 8 layers x 4 heads x 256 x K and V x 2 bytes). q8_0 is reported as almost lossless ([llama.cpp PR](https://git.tdem.in/ggerganov/llama.cpp/pull/7412), [benchmark](https://inventivehq.com/blog/kv-cache-quantization-quality-benchmark)), but dequantising costs time when fp16 fits. Do **not** use fp8 on faith: vLLM reported 91% -> 13% at 128k on Hopper from FP8 accumulation (maybe not on an RTX 3050, so measure). Check: hidden key found at 16k and 32k, same as the Qwen3.5-2B test.
+- Not now: **token eviction** (StreamingLLM, H2O, SnapKV: third-party LongBench scores 27 / 33 / 35 vs 43 for full attention, [paper](https://arxiv.org/pdf/2604.19351)); losing a token that is needed later breaks an edit. Last resort. **Prompt compression** (LLMLingua-2: [repo](https://github.com/microsoft/LLMLingua)): gains are reported for RAG text, nothing for code, and removing tokens from code breaks it; try on documents only. **Speculative decoding with MTP**: reported 92/86/71% acceptance on code, but this kernel measured NV=2 at 1.25x the cost of one token (section 6b), so ~1.1-1.3x; revisit after a faster inner loop.
+- **First measurement (needs the NPU alone):** 5 fixed edit tasks on this repo (for example, add a file extension to `documents.py`) with whole files vs repo map + chunks, on Qwen3.5-2B and 4B. Metric: the edit applies and the tests pass. Without this nothing above is proven.
+- **Feasibility of a terminal agent (create/edit/delete files):** same 5 tasks with a tool-call loop in a bounded folder; count valid tool calls. Below ~80% valid calls, ship "proposes, you run" instead of an autonomous agent; every real action needs a confirmation.
 
 ## 5. P2: retrieval quality
 - [ ] **Hybrid search for docs**: BM25 + embeddings with exact-term boost; programming-language names must not match CLI tools (`typescript` != `typst`).
@@ -106,7 +130,7 @@ Goal: remember more without getting slower or running out of window.
 ## 6. Evaluation (do this first, it keeps everything honest)
 - [x] `tests/eval_routing.py`: a labelled list of questions (including the field-report rows) with the expected decision
   (`none/docs/web/history`) and, where possible, a required/forbidden source. Runs offline for the rule layer.
-- [ ] `tests/eval_answers.py`: a few questions with checkable facts (e.g. "install an AUR package with paru" must contain `paru -S`
+- [~] `tests/eval_answers.py` (written, 4 cases, not run yet: it needs a server with the LLM loaded and the NPU alone): a few questions with checkable facts (e.g. "install an AUR package with paru" must contain `paru -S`
   and must not call AUR the "App Repository"). Compares *without* retrieval vs *with*.
 - [ ] Track accuracy and latency in `bench/RESULTS.md` after each router/memory change.
 
