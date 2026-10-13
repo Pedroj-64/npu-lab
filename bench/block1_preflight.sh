@@ -5,7 +5,7 @@ fail() { echo "PREFLIGHT FAIL: $1"; exit 1; }
 [ "$(cat /sys/class/power_supply/AC*/online 2>/dev/null | head -1)" = 1 ] || fail "charger not online"
 [ "$(powerprofilesctl get)" = performance ] || fail "power profile is not performance"
 [ -z "$(nvidia-smi --query-compute-apps=pid --format=csv,noheader)" ] || fail "another process is using the GPU"
-[ -z "$(pgrep -f 'energy.py|step_breakdown|prefix_reuse|serve.py')" ] || fail "another bench or the server is running"
+[ -z "$(pgrep -f '^[^ ]*python[^ ]* (-u )?(bench/(energy|step_breakdown|prefix_reuse)|src/serve)')" ] || fail "another bench or the server is running"
 .venv/bin/python - <<'P' || exit 1
 import torch, time, subprocess, sys
 a = torch.randn(4096, 4096, device="cuda", dtype=torch.half); b = a.clone()
