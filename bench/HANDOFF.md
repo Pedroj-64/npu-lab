@@ -25,10 +25,13 @@ Ampliaciones posteriores del usuario: (a) OCR/archivos: la herramienta ya existe
 - Por matriz, el decode hace 1 llamada de matvec por trozo de filas (`chunks`) y por trozo de K (`K/k0`); qkv, o, gate|up, down y lm_head (en trozos de 9728 filas). **qkv ya está concatenado y gate|up también** [leído: `np.concatenate(...)` en `Qwen.__init__`], así que la hipótesis "7→4 despachos por capa" del encargo probablemente ya está aplicada en el decode; revisar antes de implementar `--fuse-proj` (en prefill sí van separadas: `PrefillLin` para qkv, o, gate, up, down).
 - Prefill NPU: `PrefillNpu` crea **un contexto/xclbin por forma (K,N)**, bf16×bf16→f32, 128 tokens por llamada, y por cada llamada `blk.tobytes()`+`ba.write`+`sync`+`bc.read`, convierte X a bfloat16 y copia el resultado; el padding a 128 filas y las conversiones son sospechosos [hipótesis, **pendiente medir**]. Con la GPU activa el prefill va por GPU (`gpu_qwen.py`).
 
-## 5. Resultados medidos hasta ahora (NPU-only, GPU desactivada con `NPU_GPU=0`, 5 corridas tras 2 de calentamiento)
-Qwen3-0.6B: decode **19.83 ± 0.27** tok/s; prefill 256 → 187.17 ± 22.06, 1024 → 177.53 ± 21.98, 2048 → 140.92 ± 4.32 tok/s; TTFT 405 ± 8 ms. (Coincide con ~19 tok/s del README.)
-Qwen3-1.7B: **[pendiente]** (corriendo al escribir esto; salida en `bench/.base_17.md`; README dice ~9 tok/s decode, ~56-90 tok/s prefill).
-Bajada del prefill con la longitud: causa **[hipótesis]** = atención en numpy (O(T²)).
+## 5. Resultados medidos (NPU-only, `NPU_GPU=0`) [medido] — detalle y tablas en `bench/PERF.md`
+- Qwen3-0.6B (5 corridas + 2 de calentamiento): decode 19.83 ± 0.27 tok/s; prefill 187 / 178 / 141 tok/s (256 / 1024 / 2048); TTFT 405 ms.
+- Qwen3-1.7B (protocolo reducido: 3 + 1 y prefill a 256 y 1024, porque la corrida completa pasó de 20 min): decode 10.10 ± 0.14; prefill 108 / 52 tok/s; TTFT 847 ms.
+- Techo de DMA (memcpy, lectura+escritura a la vez): 1 col ≈ 6.5, 2 cols ≈ 12, 4 cols ≈ 18–22 GB/s por dirección.
+- `--profile`: el tiempo de `wait` en NPU = 34.8 ms (0.6B) y 81.5 ms (1.7B) por token = 17.1 y 21.1 GB/s sobre 596 y 1720 MB int8 por token → el tramo NPU ya está en el techo de DMA. Atención en CPU ≈ 13 ms/token; despacho (`submit`) ≈ 5.7 ms; ≈ 113 llamadas y 184–212 despachos por token.
+- Aviso: los números del README/ROADMAP hablan de Qwen2.5 0.5B/1.5B (anteriores) y Qwen3-1.7B con GPU; aquí todo es solo NPU y no son comparables sin cuidado.
+- **[pendiente]** `bench/attn_vs_ctx.py` (coste de atención vs contexto) estaba corriendo; su salida se pierde si se pasa por `tail`.
 
 ## 6. Trabajo ya hecho en el árbol
 - `bench/perf_baseline.py` (subido): una sola vía por proceso `--model`, imprime tabla markdown + estado de la máquina.
@@ -54,3 +57,12 @@ Bajada del prefill con la longitud: causa **[hipótesis]** = atención en numpy 
 - Variabilidad entre corridas (prefill 256: ±12 %); medir con el portátil enchufado y sin otras cargas.
 - `memlock` aparece como `unlimited`; la NPU admite como máximo 6 contextos hardware (`MAX_CONTEXTS` en `prefill_npu.py`).
 - El benchmark no incluye la ruta GPU-asistida ni los motores Qwen3.5.
+
+## 10. Lo que ya dice el ROADMAP.md (leerlo entero antes de proponer cambios; mucho de lo que se "descubre" ya está ahí)
+- **Mis medidas confirman el roadmap, no lo contradicen:** "Profile one token" (Qwen3.5-2B, 112 ms: NPU wait 86 ms = el flujo de pesos, host Python 8 ms) y "~21 GB/s", "~120 µs fijos por llamada NPU", "el kernel está a ~1.5x de su suelo de MAC int16". Conclusión del roadmap: **ganar velocidad de decode exige menos bytes o más tokens por lectura de pesos**, no micro-optimizar el host.
+- **Palancas que el roadmap ya prioriza y siguen abiertas ([ ]):** (3) cabeza de salida pequeña `NPU_FAST_VOCAB` (+10 % medido en 1.5B, +20 % estimado en 2B; pierde algo de calidad; no es default); (7) decodificación especulativa con la cabeza MTP de Qwen3.5 (~1.3–1.4x); (8) batching de peticiones independientes (map-reduce, compactación, router); (9) KV en fp8/int8 + attention sinks; **int4 por grupos** (~40 % menos bytes, ~1.6x en papel, requiere chequeo de calidad); menos lanzamientos (fusionar los 16 trozos de lm_head, fusionar o-proj con el residuo); glue de CPU in-place (−8 a −12 ms/token).
+- **Ya hecho (no repetir):** perfil por token; reparto GPU de matvecs 0/25/50 % (2B: 8.9→13.8 tok/s); CUDA graphs de DeltaNet; motor de 4 columnas con un único contexto (quita ~410 µs por cambio de contexto); atención de decode sin `np.repeat`; bloques causales en prefill; reutilización de KV entre turnos; resumen rodante; caché de documentos en disco (`statecache.py`); prefill por GPU (1333–2582 tok/s) y ventana por defecto de 80k.
+- **Consecuencia para mi trabajo:** mi hallazgo "la atención en CPU (~13 ms) es la palanca" solo vale para el perfil **NPU-only**; en el perfil Asistido la atención ya va a GPU (~3.8 ms). No invertir en optimizar la atención numpy sin antes decidir si el perfil NPU-only importa. La optimización realista para NPU-only es int4 / vocabulario reducido / especulativa, y exige chequeo de calidad.
+- **OCR:** el roadmap tiene "OCR is a requirement" aún como `[ ]` aunque `src/documents.py` ya llama a `tesseract` (spa+eng) para imágenes y PDF escaneados; el doctor ya avisa si falta. Quedan abiertos: progreso por página, marcar texto OCR en citas (ya sale "(OCR)"), modelo OCR en GPU/NPU, y el caso de imágenes sin texto.
+- **Pendientes del roadmap relacionados con lo que pide el usuario:** guardado de chats y hechos recordados (§4, `[ ]`); no guardar fragmentos recuperados en el historial; búsqueda híbrida BM25 + embeddings y reranker (§5, `[ ]`); tareas de documento entero con map-reduce (§5, `[ ]`); `tests/eval_answers.py` y registrar precisión/latencia en `bench/RESULTS.md` tras cada cambio (§6, `[ ]`); contexto: fp8 KV y sinks (backlog 9). Los hitos del usuario sobre contexto del 3B/4B con 5 GB de VRAM y respuestas complejas deben enlazar con "GPU memory cap" (`llm_vram_gb` default 5.5, `context_tokens` default 8192) y con Phase 4 (el 4B se guarda en int8 en la GPU).
+- Cada ítem del roadmap tiene "cómo comprobarlo"; antes de dar algo por hecho, repetir esa comprobación.
