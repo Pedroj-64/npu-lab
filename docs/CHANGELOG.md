@@ -6,6 +6,7 @@ What is built, with the numbers measured when it was built. Moved verbatim from 
 ## Fase 2, paso 3 (13 oct 2026): int4 simulado en CPU
 Detalle en [`../bench/INT4_SIM.md`](../bench/INT4_SIM.md); criterio commiteado antes de medir. [medido, CPU, determinista]
 - 24 configuraciones (Qwen3-1.7B y Qwen3.5-2B; grupos 32/64/128; simétrica y asimétrica; todo int4 o cabeza en int8): **ninguna cumple** (coseno >= 0.99, perplejidad <= +3 % frente a int8, 4 de 5 textos idénticos). La mejor, B_g32_asym: coseno 0.980 / 0.977, perplejidad +4.6 % / +9.6 %, 1 de 5 textos idénticos. int4 sin calibración descartado. Bytes por token reproducen el motor (int8: 1723 y 1885 MB/token).
+- **Barrido por tipo de matriz (21 combinaciones, gate+up / down / atención / cabeza y pares, g32/g64/g128 asimétrica):** 0 combinaciones pasan en los dos modelos (1 de 21 en el 2B: solo gate+up g128; 0 en el 1.7B); la vía int4 sin calibración queda cerrada.
 - Techo por bytes con int4 (por ejemplo B_g32_asym: 1127 MB/token, suelo DMA 52 ms en el 1.7B) = 14 tok/s [estimado], pero el cálculo del kernel actual (~53 ms por token) lo limitaría.
 
 ## Fase 2, paso 1 y paso 2 (13 oct 2026): bytes por token, descomposición, cabeza reducida y costes fijos

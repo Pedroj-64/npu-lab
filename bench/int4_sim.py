@@ -19,6 +19,7 @@ ap.add_argument("--new", type=int, default=32)
 a = ap.parse_args()
 OUT = f"bench/int4_sim_{os.path.basename(a.model)}.jsonl"
 CFGS = ["int8"] + [f"{v}_g{g}_{m}" for v in "AB" for g in (32, 64, 128) for m in ("sym", "asym")]
+COMBOS = [f"C_{c}_g{g}_asym" for c in ("GU", "DOWN", "ATT", "HEAD", "GU+DOWN", "GU+ATT", "DOWN+ATT") for g in (32, 64, 128)]
 SEG, NSEG = 384, 2
 PROMPTS = ["What is the capital of France? Answer in one sentence.", "Escribe una función en Python que invierta una cadena y explica cómo funciona.",
            "Lista tres comandos de pacman para instalar, quitar y buscar paquetes.", "Explain in two sentences why the sky is blue.",
@@ -46,15 +47,32 @@ def q4(W, g, asym):
     return D.view(o, -1)[:, :k]
 
 
-def bytes_cfg(shapes, cfg):
-    """MB streamed per token, scales included. shapes: [(out, in, is_head)]."""
-    tot = 0.0
-    for o, k, head in shapes:
-        if cfg == "int8" or (cfg.startswith("B") and head):
-            tot += o * k + 4 * o
-        else:
-            g = int(cfg.split("_")[1][1:]); asym = cfg.endswith("asym"); ng = -(-k // g)
+def cls_of(name):
+    return "HEAD" if name == "lm_head" else "GU" if ("gate_proj" in name or "up_proj" in name) else "DOWN" if "down_proj" in name else "ATT"
+
+
+def parse(cfg):
+    """-> {class: (group, asym)} of the classes that go to int4; every other class is int8 per row."""
+    if cfg == "int8":
+        return {}
+    if cfg.startswith("C_"):
+        _, cl, g, m = cfg.split("_")
+        return {c: (int(g[1:]), m == "asym") for c in cl.split("+")}
+    v, g, m = cfg.split("_")
+    return {c: (int(g[1:]), m == "asym") for c in (("ATT", "GU", "DOWN", "HEAD") if v == "A" else ("ATT", "GU", "DOWN"))}
+
+
+def bytes_cfg(shapes, cfg, only=None):
+    """MB streamed per token, scales included (restricted to class `only` if given). shapes: [(out, in, class)]."""
+    q, tot = parse(cfg), 0.0
+    for o, k, c in shapes:
+        if only and c != only:
+            continue
+        if c in q:
+            g, asym = q[c]; ng = -(-k // g)
             tot += o * k * 0.5 + o * ng * (2 + (0.5 if asym else 0))
+        else:
+            tot += o * k + 4 * o
     return tot / 1e6
 
 
@@ -72,17 +90,17 @@ def original(name):
     assert key, f"no original for {name}"
     with safe_open(src[key], "pt") as h: return h.get_tensor(key).float()
 lins = [(n, m) for n, m in model.named_modules() if isinstance(m, torch.nn.Linear)]
-shapes = [(m.weight.shape[0], m.weight.shape[1], n == "lm_head") for n, m in lins]
+shapes = [(m.weight.shape[0], m.weight.shape[1], cls_of(n)) for n, m in lins]
 body = [(n, m) for n, m in lins if n != "lm_head"]; head = model.lm_head
 
 
 def apply(cfg):
-    t = time.perf_counter()
+    t = time.perf_counter(); q = parse(cfg)
     for n, m in body:
-        W = original(n + ".weight")
-        m.weight.copy_((q8(W) if cfg == "int8" else q4(W, int(cfg.split("_")[1][1:]), cfg.endswith("asym"))).to(torch.bfloat16))
+        W = original(n + ".weight"); c = cls_of(n)
+        m.weight.copy_((q4(W, *q[c]) if c in q else q8(W)).to(torch.bfloat16))
     Wh = (orig_head if orig_head is not None else original("lm_head.weight")).float()
-    head.weight.copy_((q8(Wh) if cfg == "int8" or cfg.startswith("B") else q4(Wh, int(cfg.split("_")[1][1:]), cfg.endswith("asym"))).to(torch.bfloat16))
+    head.weight.copy_((q4(Wh, *q["HEAD"]) if "HEAD" in q else q8(Wh)).to(torch.bfloat16))
     return time.perf_counter() - t
 
 
@@ -113,6 +131,7 @@ def evaluate(ref=None):
 done = {json.loads(l)["cfg"]: json.loads(l) for l in open(OUT)} if os.path.exists(OUT) else {}
 if a.stage == "sweep":
     want = a.only.split(",") if a.only else ["bf16"] + CFGS
+    if a.only == "combos": want = ["int8"] + COMBOS
     ref_logits = None
     if "bf16" not in done or any(c not in done for c in want if c != "bf16"):
         t = time.perf_counter(); ppl0, _, _, ref_logits = evaluate(); tref = time.perf_counter() - t
@@ -122,7 +141,7 @@ if a.stage == "sweep":
     for cfg in want:
         if cfg in done: continue
         tq = apply(cfg); t = time.perf_counter(); ppl, cm, cmin, _ = evaluate(ref_logits)
-        r = dict(cfg=cfg, ppl=ppl, cos_mean=cm, cos_min=cmin, mb_token=bytes_cfg(shapes, cfg), quant_s=tq, eval_s=time.perf_counter() - t)
+        r = dict(cfg=cfg, ppl=ppl, cos_mean=cm, cos_min=cmin, mb_token=bytes_cfg(shapes, cfg), mb_by_class={c: bytes_cfg(shapes, cfg, c) for c in ('ATT', 'GU', 'DOWN', 'HEAD')}, quant_s=tq, eval_s=time.perf_counter() - t)
         open(OUT, "a").write(json.dumps(r) + "\n"); done[cfg] = r
         print(f"{cfg:12} ppl {ppl:.3f}  cos mean {cm:.5f} min {cmin:.4f}  {r['mb_token']:.0f} MB/token  (quantise {tq:.0f} s, eval {r['eval_s']:.0f} s)", flush=True)
 else:

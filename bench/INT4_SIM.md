@@ -82,3 +82,40 @@ Suelo por DMA = MB/token / 21.8 GB/s. Si solo se encoge la espera de la NPU y el
 **Combinaciones:** las 4 clases sueltas; los pares GU+DOWN, GU+ATT, DOWN+ATT; y GU+DOWN+ATT+HEAD ya medidas (variante A) y GU+DOWN+ATT (variante B) quedan como referencia. Cuantización **asimétrica** (la simétrica fue peor en 12 de 12 comparaciones del paso 3) y grupos de **32, 64 y 128**. Total: 7 combinaciones x 3 grupos = 21 configuraciones por modelo, en Qwen3-1.7B y Qwen3.5-2B. Mismo texto fijo y mismos 5 prompts que el paso 3.
 **Criterio (mismo umbral que el paso 3, más una condición de utilidad):** una combinación PASA si cumple (1) coseno medio de logits >= 0.99 frente a bf16; (2) perplejidad <= +3 % frente a int8; (3) texto idéntico al de int8 en >= 4 de 5 prompts (solo se evalúa en las que pasan (1) y (2)); **y** (4) **ahorra al menos un 15 % de bytes por token frente a int8** (sin ahorro apreciable no vale la pena el cambio). Se exige que pase en **los dos modelos**; si pasa solo en uno, se reporta pero no se cierra como viable.
 **Tope:** si ninguna combinación pasa, la vía "int4 sin calibración" se cierra definitivamente y GPTQ/AWQ queda solo anotado en el ROADMAP. Si alguna pasa, **no se escribe ningún kernel**: se documenta (y el límite de cálculo del paso 3 sigue aplicando: `mv_i8_i8` en espera).
+
+### Resultados del barrido por clase [medido, CPU, determinista; `bench/int4_sim.py sweep --only combos`, crudos en los mismos `.jsonl`]
+Cuotas de bytes por token con todo en int8 (calculadas, no supuestas): **1.7B** GU 41 %, ATT 20 %, DOWN 20 %, HEAD 18 % (1723 MB); **2B** GU 32 %, ATT 25 %, DOWN 16 %, HEAD 27 % (1885 MB). Regresión: la combinación GU+DOWN+ATT en g32 reproduce exactamente la variante B del paso 3 (perplejidad 40.397, coseno 0.98001, 1127 MB/token). Todas con cuantización asimétrica. Perplejidad y ahorro frente a int8 (ppl 38.634 en el 1.7B, 26.878 en el 2B).
+
+| clases en int4 | grupo | 1.7B: coseno | ppl | ahorro | 2B: coseno | ppl | ahorro | cumple (1)(2)(4) en 1.7B / 2B |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| GU | 32 | 0.9913 | +3.0 % | 17.3 % | 0.9937 | +1.1 % | 13.6 % | no / no |
+| GU | 64 | 0.9904 | +3.6 % | 18.9 % | 0.9918 | +2.9 % | 14.8 % | no / no |
+| GU | 128 | 0.9878 | +7.5 % | 19.7 % | 0.9903 | +1.7 % | 15.5 % | no / sí |
+| DOWN | 32 | 0.9921 | +0.9 % | 8.6 % | 0.9945 | +2.6 % | 6.8 % | no / no |
+| DOWN | 64 | 0.9892 | +2.7 % | 9.4 % | 0.9930 | +2.1 % | 7.4 % | no / no |
+| DOWN | 128 | 0.9871 | +4.9 % | 9.8 % | 0.9917 | +1.0 % | 7.7 % | no / no |
+| ATT | 32 | 0.9914 | +0.3 % | 8.7 % | 0.9872 | +6.4 % | 10.5 % | no / no |
+| ATT | 64 | 0.9870 | +1.3 % | 9.5 % | 0.9838 | +6.6 % | 11.5 % | no / no |
+| ATT | 128 | 0.9839 | +0.3 % | 9.9 % | 0.9797 | +6.3 % | 11.9 % | no / no |
+| HEAD | 32 | 0.9963 | +1.6 % | 7.7 % | 0.9960 | +2.9 % | 11.4 % | no / no |
+| HEAD | 64 | 0.9956 | +4.4 % | 8.4 % | 0.9949 | +1.5 % | 12.5 % | no / no |
+| HEAD | 128 | 0.9948 | +3.4 % | 8.7 % | 0.9937 | +2.1 % | 13.0 % | no / no |
+| GU+DOWN | 32 | 0.9860 | +3.7 % | 26.0 % | 0.9888 | +3.6 % | 20.4 % | no / no |
+| GU+DOWN | 64 | 0.9816 | +7.4 % | 28.4 % | 0.9852 | +5.2 % | 22.2 % | no / no |
+| GU+DOWN | 128 | 0.9788 | +12.2 % | 29.6 % | 0.9824 | +2.7 % | 23.2 % | no / no |
+| GU+ATT | 32 | 0.9865 | +2.6 % | 26.0 % | 0.9812 | +7.1 % | 24.1 % | no / no |
+| GU+ATT | 64 | 0.9808 | +6.5 % | 28.4 % | 0.9764 | +9.3 % | 26.3 % | no / no |
+| GU+ATT | 128 | 0.9743 | +7.4 % | 29.6 % | 0.9706 | +8.4 % | 27.4 % | no / no |
+| DOWN+ATT | 32 | 0.9842 | +0.7 % | 17.3 % | 0.9826 | +9.1 % | 17.3 % | no / no |
+| DOWN+ATT | 64 | 0.9755 | +5.6 % | 18.9 % | 0.9781 | +9.1 % | 18.9 % | no / no |
+| DOWN+ATT | 128 | 0.9708 | +6.8 % | 19.7 % | 0.9722 | +8.5 % | 19.7 % | no / no |
+
+**Cuenta de combinaciones que cumplen (1) coseno >= 0.99, (2) perplejidad <= +3 % y (4) ahorro >= 15 %:** en el 1.7B, **0 de 21**; en el 2B, **1 de 21** (solo gate+up en int4, grupo 128: coseno 0.9903, +1.7 %, ahorro 15.5 %); en los dos modelos a la vez, **0 de 21**. El criterio (3) (tokens) no llegó a evaluarse porque nada pasa en ambos modelos.
+
+**Casi-aciertos, anotados con sus cifras exactas (no se reinterpreta el umbral):**
+- **Solo gate+up en int4, grupo 32:** 1.7B coseno 0.9913, ahorro 17.3 %, perplejidad **+3.02 %** (falla el 3 % por 0.02 puntos); 2B coseno 0.9937, perplejidad +1.1 %, ahorro **13.6 %** (falla el 15 % por 1.4 puntos). Con grupo 64: 1.7B +3.6 %, 2B ahorro 14.8 %.
+- **Solo `down` o solo `ATT` o solo la cabeza** en int4 pasan calidad en el 1.7B (grupo 32) pero ahorran 8-9 %, y en el 2B `ATT` falla calidad (+6.3 % a +6.6 %).
+- **Cualquier par** (el ahorro llega a 20-30 %) falla calidad en el 2B y en casi todos los del 1.7B (el mejor par: GU+ATT g32, 1.7B +2.6 % pero coseno 0.9865).
+- La sensibilidad por clase difiere entre modelos: la atención (`ATT`) es lo más sensible en el 2B (DeltaNet/atención híbrida), mientras que en el 1.7B lo más sensible es gate+up en grupos grandes.
+
+**Resultado: ninguna combinación pasa en los dos modelos -> por el tope fijado, la vía "int4 sin calibración" queda CERRADA.** El máximo que ofrece sin romper la calidad según el criterio es ~15-17 % menos de bytes (solo gate+up), que daría como mucho ~1.1x en el paso [estimado] y que además tropezaría con el límite del cálculo (paso 3). GPTQ/AWQ queda solo anotado en el ROADMAP.
