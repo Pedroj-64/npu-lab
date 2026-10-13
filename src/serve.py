@@ -24,7 +24,7 @@ DEFAULT_SHARE = {"qwen35m": 0.5}                                                
 
 # Peak GPU memory (MiB, nvidia-smi) per model and share, measured with llm_vram_gb 5.0 and a 12000-token window (bench/ENERGY.md, bench/PROPUESTA_GPU_SANA.md). Missing entry: only the check after loading applies.
 PEAK_MIB = {("qwen35m", 0.0): 3401, ("qwen35m", 0.25): 3583, ("qwen35m", 0.5): 3825, ("qwen35m", 0.75): 4067, ("qwen35l", 0.0): 5057, ("qwen35l", 0.25): 5277, ("qwen35l", 0.5): 5755}
-ACT_MIB = 400                    # prompt-reading activations on top of what is resident after loading (355 MiB measured on the 4B)
+ACT_MIB = 64                     # extra GPU memory seen while reading a long prompt after loading: 22 MiB for a 10 000-token prompt on the 4B (the 1024-token chunk buffers, 355 MiB, are already inside the memory limit)
 DEFAULT_VRAM_MARGIN_MIB = 700    # GPU memory kept free for the desktop; the user decides the final value (Settings)
 BUILD_CMD = "python scripts/build_matvec.py --shared4 $(python src/qwen35_npu.py --model {dir} --shapes --share {share})"     # ~80 s on this machine
 
@@ -42,6 +42,15 @@ def free_vram_mib():
         return int(subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10).stdout.split()[0])
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
         return None               # no NVIDIA tools: nothing to check
+
+
+def own_vram_mib():
+    """GPU memory this very process still holds (the CUDA context stays after a model is unloaded). A new model reuses it, so it does not count against the new model."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10).stdout
+        return sum(int(m.split(",")[1]) for m in out.strip().splitlines() if m.split(",")[0].strip() == str(os.getpid()))
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return 0
 
 
 def vram_refusal(model, share, margin_mib, free_mib):
@@ -332,7 +341,8 @@ def set_mode(mode, model=None, device="npu"):
                 share = share_of(model, rl); miss = missing_kernels(model, share)
                 if miss:
                     raise Bad(409, f"{len(miss)} NPU kernels are missing for {model} at a {share:.0%} GPU share (~80 s to build): " + BUILD_CMD.replace("{dir}", MODELS[model]).replace("{share}", str(share)))
-                msg = vram_refusal(model, share, margin, free_vram_mib())
+                free = free_vram_mib()
+                msg = vram_refusal(model, share, margin, None if free is None else free + own_vram_mib())
                 if msg:
                     raise Bad(409, msg)
             # assisted: the GPU reads prompts and holds the KV cache / DeltaNet state; the NPU still generates every token

@@ -3,6 +3,9 @@
 What is built, with the numbers measured when it was built. Moved verbatim from the old `ROADMAP.md` (Oct 2026); what is still open lives in
 [`../ROADMAP.md`](../ROADMAP.md) and the reasons for not building things in [`DECISIONS.md`](DECISIONS.md). Newest measurements first in section 0.
 
+## 4B cargable otra vez (13 oct 2026)
+Con `llm_vram_gb` 4.7 y margen 450 MiB el 4B carga en la CLI y en el servidor: ventana 11 636 tokens, 845 MiB libres tras cargar. La comprobación previa descuenta la memoria que el servidor conserva tras descargar otro modelo (cambiar de modelo al 4B se negaba por ~145 MiB) y la reserva de activaciones es el pico medido (64 MiB). Cola siguiente en `ROADMAP.md`.
+
 ## Reparto de GPU por modelo y perfil de máxima velocidad (13 oct 2026)
 [medido] 2B al 75 %: coseno de logits >= 0.99994 y perplejidad +0.50 % frente a 0 % (el 50 % da +0.23 %); 300 s sostenidos sin caída (18.6-19.1 tok/s, ~59-60 W, GPU <= 69 °C, CPU hasta 93 °C). Defectos: 2B 50 %, 4B 0 % (25 % opt-in con aviso). Reparto por modelo en `rules.json` (`gpu_share` pasa de número a objeto `{modelo: reparto}`): **un reparto escalar de un archivo antiguo se ignora** y vale el defecto de cada modelo. Si faltan los kernels de un reparto, la interfaz lo atenúa y muestra el comando de compilación (~80 s); cargar también se niega con ese comando. Nuevo margen configurable de memoria de GPU para el escritorio (`vram_margin_mib`, 700 MiB): se niega la carga que lo rompa. `StateCache` en 0700/0600. Detalle: `bench/PROPUESTA_GPU_SANA.md`.
 
