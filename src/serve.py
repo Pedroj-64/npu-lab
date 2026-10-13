@@ -528,7 +528,7 @@ class H(BaseHTTPRequestHandler):
                     auto = router.from_label(S.engine.classify(prompt, router.CLASSIFY_SYSTEM, list(router.LABELS)))
                 use_docs, use_web = router.resolve(d.get("docs", "auto"), auto["docs"]), router.resolve(d.get("web", "auto"), auto["web"])
                 import documents
-                use_mine = router.resolve(d.get("mine", "auto"), bool(documents.listing()) and not auto["history"])
+                use_mine = router.resolve(d.get("mine", "auto"), bool(documents.listing()) and (not auto["history"] or documents.refers(prompt, documents.listing())))   # "and the second page of this PDF?" is a follow-up that still needs the file
                 self._line({"route": {"docs": use_docs, "web": use_web, "mine": use_mine, "reason": auto["reason"], "escalate": router.escalate(prompt)}})
                 if use_docs:
                     self._line({"phase": "docs"})

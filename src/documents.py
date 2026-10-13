@@ -10,9 +10,11 @@ import hashlib, html, json, os, pickle, re, shutil, subprocess, tempfile, time, 
 import numpy as np
 
 DIR = os.environ.get("NPU_LAB_DOCS") or os.path.expanduser("~/.local/share/npu-lab/documents")
-TEXT = (".md", ".markdown", ".txt", ".rst", ".log", ".csv", ".json", ".yaml", ".yml", ".toml", ".py", ".rs", ".js", ".ts", ".c", ".h", ".cpp", ".sh")
-IMAGES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp")
-EXTS = TEXT + IMAGES + (".pdf", ".html", ".htm", ".docx")
+TEXT = (".md", ".markdown", ".txt", ".rst", ".log", ".csv", ".tsv", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".xml", ".tex", ".sql",
+        ".py", ".rs", ".js", ".mjs", ".ts", ".jsx", ".tsx", ".c", ".h", ".cpp", ".hpp", ".go", ".java", ".kt", ".css", ".scss", ".sh", ".fish", ".lua", ".rb", ".php", ".nix")
+IMAGES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".gif")
+ZIPS = (".docx", ".pptx", ".xlsx", ".odt", ".ods", ".odp", ".epub")          # office / e-book formats: text lives in XML or XHTML inside a zip
+EXTS = TEXT + IMAGES + ZIPS + (".pdf", ".html", ".htm", ".rtf")
 MAX_BYTES, MAX_CHUNKS, CHUNK = 30 * 1024 * 1024, 4000, 600
 MIN_COS = 0.33      # a chunk is only used when its similarity to the question reaches this (relevant hits scored 0.37-0.71, unrelated <= 0.13; see tests/test_documents.py)
 OCR_LANG = os.environ.get("NPU_LAB_OCR_LANG", "spa+eng")
@@ -58,11 +60,46 @@ def _pdf(path, progress):
     return res
 
 
+def _zipped(path, ext):
+    """docx / pptx / xlsx / odt / ods / odp / epub -> [[page, text, False]] (one page per slide, sheet or chapter where the format has them)."""
+    try:
+        z = zipfile.ZipFile(path)
+    except zipfile.BadZipFile:
+        raise DocError(f"not a valid {ext} file")
+    names, rd = z.namelist(), lambda n: z.read(n).decode("utf-8", "ignore")
+    strip = lambda x: html.unescape(re.sub(r"<[^>]+>", " ", x))
+    key = lambda n: [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", n)]       # slide2 before slide10
+    if ext == ".docx":
+        return [[1, strip(re.sub(r"</w:p>", "\n", rd("word/document.xml"))), False]] if "word/document.xml" in names else []
+    if ext == ".pptx":
+        return [[i + 1, strip(re.sub(r"</a:p>", "\n", rd(n))), False] for i, n in enumerate(sorted((n for n in names if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)), key=key))]
+    if ext == ".xlsx":
+        sst = re.findall(r"(?s)<si>(.*?)</si>", rd("xl/sharedStrings.xml")) if "xl/sharedStrings.xml" in names else []
+        sst = [strip(x).strip() for x in sst]
+        out = []
+        for i, n in enumerate(sorted((n for n in names if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n)), key=key)):
+            rows = []
+            for row in re.findall(r"(?s)<row[^>]*>(.*?)</row>", rd(n)):
+                cells = []
+                for attrs, body in re.findall(r"(?s)<c([^>]*)>(.*?)</c>", row):
+                    v = re.search(r"<v>(.*?)</v>", body)
+                    if v:
+                        cells.append(sst[int(v[1])] if 't="s"' in attrs and v[1].isdigit() and int(v[1]) < len(sst) else html.unescape(v[1]))
+                rows.append(" | ".join(cells))
+            out.append([i + 1, "\n".join(rows), False])
+        return out
+    if ext == ".epub":
+        return [[i + 1, strip(re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", rd(n))), False] for i, n in enumerate(sorted(n for n in names if n.lower().endswith((".xhtml", ".html", ".htm"))))]
+    return [[1, strip(re.sub(r"</text:(p|h)>", "\n", rd("content.xml"))), False]] if "content.xml" in names else []      # odt / ods / odp
+
+
 def extract(name, data, progress=lambda m: None):
     """-> [[page, text, ocr_used]]. Raises DocError for unsupported/empty/unreadable files."""
     ext = os.path.splitext(name.lower())[1]
+    if ext not in EXTS and (b"\0" in data[:8192] or not data.strip()):          # an unknown extension is fine when the content is plain text
+        raise DocError(f"unsupported file type {ext or '(none)'}: not plain text. Supported: pdf, docx, pptx, xlsx, odt, epub, rtf, html, images (OCR), and any text/code file")
     if ext not in EXTS:
-        raise DocError(f"unsupported file type {ext or '(none)'}; supported: pdf, md, txt, html, docx, images")
+        ext = ".txt"
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "f" + ext)                 # never the user's file name
         open(path, "wb").write(data)
@@ -71,12 +108,12 @@ def extract(name, data, progress=lambda m: None):
         elif ext in IMAGES:
             progress("OCR")
             pages = [[1, ocr_image(path), True]]
-        elif ext == ".docx":
-            try:
-                xml = zipfile.ZipFile(path).read("word/document.xml").decode("utf-8", "ignore")
-            except (zipfile.BadZipFile, KeyError):
-                raise DocError("not a valid .docx")
-            pages = [[1, html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"</w:p>", "\n", xml))), False]]
+        elif ext in ZIPS:
+            pages = _zipped(path, ext)
+        elif ext == ".rtf":
+            t = data.decode("latin-1")
+            t = re.sub(r"\\'([0-9a-f]{2})", lambda m: bytes.fromhex(m[1]).decode("cp1252", "ignore"), t)
+            pages = [[1, re.sub(r"\\[a-z]+-?\d* ?|[{}]", "", t), False]]
         else:
             t = data.decode("utf-8", "ignore")
             if ext in (".html", ".htm"):
@@ -85,7 +122,8 @@ def extract(name, data, progress=lambda m: None):
     pages = [[p, re.sub(r"[ \t]+", " ", re.sub(r"\n{3,}", "\n\n", t)).strip(), o] for p, t, o in pages]
     pages = [p for p in pages if p[1]]
     if not pages:
-        raise DocError("no text found in this file")
+        raise DocError("no readable text in this file" + (": for an image, the models here cannot look at pictures, they only get text found by OCR "
+                       "(a photo without writing gives none)" if ext in IMAGES else ""))
     return pages
 
 
@@ -140,10 +178,23 @@ def delete(i):
             os.remove(p)
 
 
+POINTS_AT = re.compile(r"\b(this|that|the|my|attached|uploaded)\s+(file|document|doc|pdf|image|photo|picture|scan|screenshot|spreadsheet|slides?|sheet|book|paper|article)s?\b"
+                       r"|\b(est[eaoé]s?|ese|esa|mi|el|la|adjunto|adjunta|subido|subida)\s+(archivo|documento|pdf|imagen|foto|captura|escaneo|hoja|libro|art[ií]culo|presentaci[oó]n|diapositivas?)s?\b"
+                       r"|\b(archivo|documento|pdf|imagen|foto|adjunto)s?\b", re.I)
+
+
+def refers(query, metas=()):
+    """True when the question points at a file ("this PDF", "esta foto", or a stored file's name): the similarity gate is skipped then,
+    because "what does this photo say?" shares no words with the text inside it."""
+    q = query.lower()
+    return bool(POINTS_AT.search(q)) or any(len(stem) >= 4 and stem in q for stem in (os.path.splitext(m["name"].lower())[0] for m in metas))
+
+
 def retrieve(model, query, k=4, gate=True):
     metas = listing()
     if not metas:
         return []
+    gate = gate and not refers(query, metas)
     q = model.encode([query])[0].astype(np.float32)
     cand = []
     for m in metas:
