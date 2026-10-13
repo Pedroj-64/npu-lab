@@ -6,3 +6,22 @@ Etiquetas: **[medido]**, **[leído en código]**, **[estimado]**, **[propuesto]*
 **Qué se mide:** por token, el tiempo del paso (`Qwen35.step`) repartido en: espera de la NPU, resto del coste de las llamadas NPU (preparar, enviar, recoger), pasos de la GPU (`linear_step` de las capas DeltaNet y `attn_step` de las de atención completa, que incluyen la subida/bajada de datos, porque devuelven NumPy), cabeza de salida (`lm`), y el pegamento de CPU (embedding, normas, SiLU, sumas residuales). Instrumentación en el propio script (copia del paso con relojes), sin tocar `src/`; el reparto por GPU queda a 0 %.
 **Criterio de éxito:** (1) la copia instrumentada devuelve exactamente los mismos logits que `Qwen35.step` sobre 5 pasos fijos (diferencia 0); (2) las partes suman el paso total con un error <= 5 %; (3) 3 corridas de 48 tokens por modelo, media ± desviación, desviación del total <= 5 %; (4) se identifica la parte mayor fuera de la espera y se estima su cota inferior (qué parte es lanzamiento/sincronización y qué parte cálculo) con una medida, no con una suposición.
 **Qué NO se concluye:** nada sobre una GPU sana; las cifras de GPU son de una GPU degradada.
+
+### Resultados del lote A [medido, GPU degradada; `bench/step_breakdown.py`, 3 corridas x 48 tokens, reparto de GPU 0 %, crudos en `bench/step_breakdown.jsonl`]
+Criterios: (1) logits idénticos en 5 pasos fijos: **sí** en los dos modelos; (2) las partes suman el paso con error <= 0.1 %; (3) desviación del total 1.7 % (2B) y 0.3 % (4B); (4) cota inferior medida (abajo).
+
+| parte del paso | 2B ms (%) | 4B ms (%) |
+|---|---:|---:|
+| NPU: espera del flujo de pesos | 88.0 ± 0.4 (65 %) | 195.5 ± 0.2 (67 %) |
+| NPU: coste de las llamadas (preparar, enviar, recoger; capas + cabeza) | 10.4 (8 %) | 20.3 (7 %) |
+| GPU: pasos DeltaNet (18 / 24 por token) | 28.0 ± 1.1 (21 %) | 64.2 ± 0.3 (22 %) |
+| GPU: pasos de atención (6 / 8 por token) | 7.7 ± 0.2 (6 %) | 9.9 ± 0.3 (3 %) |
+| CPU: pegamento (embedding, normas, SiLU, residuales) | 1.7 (1 %) | 3.0 (1 %) |
+| paso total (con relojes) | 136.0 ± 2.3 | 293.1 ± 0.9 |
+
+**Lo que hay fuera de la espera (36 % en el 2B, 33 % en el 4B):**
+- **El mayor trozo son los pasos DeltaNet de la GPU (21-22 %), y casi todo es tiempo de núcleos en una GPU degradada:** repetir los grafos CUDA de las capas DeltaNet sin copias tarda 16.6 ms (2B; 921 µs por capa) y 50.8 ms (4B; 2117 µs por capa), el 59 % y el 79 % del tiempo medido de esos pasos. Con la GPU sana el CHANGELOG da 3.9 ms por token para el 2B, así que esta parte hoy está limitada por la GPU, no por el diseño [medido, GPU degradada].
+- **Lanzamiento, copias y sincronización de la GPU (cota inferior del ahorro por fusionar):** un viaje GPU vacío (copiar, repetir un grafo mínimo, sincronizar, copiar) cuesta 22-23 µs, es decir 0.5-0.7 ms por token: el coste fijo por sí solo es despreciable. Lo que sobra entre el tiempo de núcleos (perfil de un token: 18.1 ms en el 2B con 1152 núcleos y 306 lanzamientos; 54.1 ms en el 4B con 1584 núcleos y 408 lanzamientos) y el tiempo de los pasos de GPU (35.7 y 74.1 ms) son **~17.6 ms (13 % del paso) en el 2B y ~20 ms (7 %) en el 4B** entre copias, conversiones a NumPy, sincronización y huecos entre lanzamientos. Es el techo de lo que se ganaría fusionando lanzamientos y copias, y solo existe con GPU; con la GPU sana la parte de núcleos se encoge y este resto pesaría más.
+- **Costes fijos de la NPU: 10.4 ms (8 %) en el 2B y 20.3 ms (7 %) en el 4B.** Es la parte accionable sin GPU: lote C.
+- El pegamento de CPU es 1 %; no merece trabajo.
+- No hay solapamiento posible dentro de un token (cada capa depende de la anterior): la GPU espera a la NPU y al revés.
