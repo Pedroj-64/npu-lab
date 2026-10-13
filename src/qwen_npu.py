@@ -556,7 +556,7 @@ class Qwen:
         """Short generation under its own system prompt (used to summarise old conversation turns)."""
         return "".join(self.stream(prompt, n, system=system))
 
-    def option_probs(self, prompt, system, labels, limit=600):
+    def option_probs(self, prompt, system, labels, limit=600, strict=False):
         """Probability of each of `labels` as the next word: read the prompt once and take the softmax of the next-token scores of the labels'
         first tokens (so the answer is always one of them; nothing is sampled and no free text has to be parsed)."""
         text = (f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\nQuestion: {prompt[:limit]}\n"
@@ -568,8 +568,10 @@ class Qwen:
         else:
             for pos, t in enumerate(ids):
                 logits = self.step(t, pos)
-        first = [self.tok.encode(l, add_special_tokens=False).ids[0] for l in labels]
+        enc = [self.tok.encode(l, add_special_tokens=False).ids for l in labels]
+        first = [e[0] for e in enc]
         assert len(set(first)) == len(first), f"labels share their first token: {labels}"
+        assert not strict or all(len(e) == 1 for e in enc), f"each label must be ONE token (a split word like DOCS = DO+CS is scored by its first piece only): {labels}"
         if self.vpos is not None:
             z = np.array([logits[self.vpos[t]] if self.vpos[t] >= 0 else -1e30 for t in first], np.float64)
         else:

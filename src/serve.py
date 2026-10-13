@@ -128,6 +128,20 @@ def set_rules(d):
                 raise Bad(400, f"the project must be an existing folder inside your home: {x}")
             x = real
         r["project_root"] = x
+    if "agent_test_command" in d:                     # the only command the agent's RUN may start (after your confirmation); empty = no RUN
+        x = " ".join(str(d["agent_test_command"]).split())
+        if len(x) > 300 or "\n" in str(d["agent_test_command"]):
+            raise Bad(400, "agent_test_command must be one line of at most 300 characters")
+        r["agent_test_command"] = x
+    if "agent_guard" in d:
+        if d["agent_guard"] not in ("off", "objective", "model"):
+            raise Bad(400, "agent_guard must be off, objective or model")
+        r["agent_guard"] = d["agent_guard"]
+    if "agent_guard_tau" in d:
+        v = float(d["agent_guard_tau"])
+        if not 0.0 <= v <= 1.0:
+            raise Bad(400, "agent_guard_tau must be between 0 and 1")
+        r["agent_guard_tau"] = v
     if "save_chats" in d:
         r["save_chats"] = bool(d["save_chats"])
     if "gpu_vram_gb" in d:
@@ -479,7 +493,22 @@ class H(BaseHTTPRequestHandler):
             root = search.rules().get("project_root", "")
             if not root or not os.path.isdir(root):
                 raise Bad(409, "no project folder is set (Settings)")
-            self._send(200, agent.run(root, str(d.get("text", ""))[:400000], confirmed=d.get("confirm") is True, last_ok=d.get("last_ok") is not False))
+            rl = search.rules(); guard = rl.get("agent_guard", "off"); backend = None
+            if guard == "model":                  # the loaded model answers one closed question about the evidence; it needs the NPU/GPU for a moment and overwrites its KV cache
+                import decide
+                if S.engine is None or not hasattr(S.engine, "option_probs"):
+                    guard = "objective"
+                elif not S.npu_lock.acquire(blocking=False):
+                    raise Bad(409, "The NPU is busy answering a request. Try again in a moment.")
+                else:
+                    backend = decide.LogprobBackend(S.engine, limit=12000)
+            try:
+                self._send(200, agent.run(root, str(d.get("text", ""))[:400000], confirmed=d.get("confirm") is True, last_ok=d.get("last_ok") is not False,
+                                          test_command=rl.get("agent_test_command", ""), guard=guard, backend=backend, task=str(d.get("task", ""))[:2000],
+                                          tau=float(rl.get("agent_guard_tau", 0.5))))
+            finally:
+                if backend is not None:
+                    S.npu_lock.release()
         elif self.path == "/project/apply":      # writes files: only inside the chosen project, all or nothing, and only when the user pressed Apply
             import project, search
             root = search.rules().get("project_root", "")
@@ -629,7 +658,7 @@ class H(BaseHTTPRequestHandler):
                     if root and os.path.isdir(root):          # project mode: the map in the (cached) system prompt, the files the question names in the question
                         if d.get("agent") is True:            # terminal agent: one action per reply (the page runs it through /agent/run)
                             import agent
-                            system += agent.system_block(root)
+                            system += agent.system_block(root, rl.get("agent_test_command", ""))
                         else:
                             import project
                             system += project.system_block(root)

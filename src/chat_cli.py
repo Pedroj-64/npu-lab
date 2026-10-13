@@ -135,15 +135,15 @@ class Chat:
         except (RuntimeError, EOFError) as e:
             print(red(str(e)))
 
-    def agent_loop(self, answer):
+    def agent_loop(self, answer, task=""):
         ok = True
         for step in range(MAX_STEPS):
             try:
-                r = self.srv.call("/agent/run", {"text": answer, "last_ok": ok})
+                r = self.srv.call("/agent/run", {"text": answer, "last_ok": ok, "task": task})
                 if r["needs_confirm"]:
                     print(colour_diff(r["shown"]))
                     if input(bold("Do it? [y/N] ")).strip().lower() != "y": print(dim("agent stopped; nothing was changed")); return
-                    r = self.srv.call("/agent/run", {"text": answer, "confirm": True, "last_ok": ok})
+                    r = self.srv.call("/agent/run", {"text": answer, "confirm": True, "last_ok": ok, "task": task})
                     print(green("done: ") + dim(r["shown"][:300]) if r["ok"] else red("failed: ") + r["shown"][:300])
                 else:
                     print(dim(("→ " if r["ok"] else "✗ ") + r["shown"][:300].replace("\n", "\n  ")))
@@ -197,7 +197,7 @@ def main():
                 if line.startswith("/"): chat.command(line); continue
                 print(green("\nmodel ▸ "), end="")
                 answer = chat.ask(line)
-                if answer: chat.agent_loop(answer) if chat.agent else chat.edits(answer)
+                if answer: chat.agent_loop(answer, line) if chat.agent else chat.edits(answer)
                 print()
             except KeyboardInterrupt:
                 print()

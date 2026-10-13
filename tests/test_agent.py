@@ -41,6 +41,11 @@ try:
             c.request("POST", path, json.dumps(body), {"Authorization": "Bearer " + T, "Host": f"127.0.0.1:{port}"}); r = c.getresponse(); return r.status, json.loads(r.read())
         assert call("/agent/run", {"text": "LIST"})[0] == 409                                         # no project set
         assert call("/rules", {"project_root": proj})[0] == 200
+        assert call("/rules", {"agent_guard": "yes"})[0] == 400 and call("/rules", {"agent_guard_tau": 2})[0] == 400 and call("/rules", {"agent_test_command": "a\nb"})[0] == 400
+        assert call("/rules", {"agent_guard": "objective", "agent_test_command": f"{sys.executable} -c pass"})[0] == 200
+        s, r = call("/agent/run", {"text": "RUN"}); assert r["needs_confirm"], r                       # RUN is available once a command is configured, and waits for the click
+        s, r = call("/agent/run", {"text": "RUN", "confirm": True}); assert r["executed"] and "exit code 0" in r["shown"], r
+        assert call("/rules", {"agent_guard": "off", "agent_test_command": ""})[0] == 200
         s, r = call("/agent/run", {"text": "READ a.py"}); assert s == 200 and r["ok"] and "return 2" in r["shown"], r
         e = "a.py\n<<<<<<< SEARCH\nreturn 2\n=======\nreturn 9\n>>>>>>> REPLACE"
         s, r = call("/agent/run", {"text": e}); assert r["needs_confirm"] and "return 2" in read("a.py"), r

@@ -13,26 +13,30 @@ SYSTEM_DONE = ("You check the work of a coding agent. Answer only from the evide
                "judge the files that changed and the output of the checks.")
 SYSTEM_MIXER = ("You decide which model should answer a request. fast = short facts, translations, small talk; medium = explanations, short code, questions about "
                 "documents; slow = multi-file code changes, refactors, long or multi-step reasoning. Do not answer the request.")
+SYSTEM_ROUTE = ("You route questions to a source. Do not answer them.\n"
+                "None: general knowledge, programming, science, writing, concepts. Example: 'explain what a closure is'.\n"
+                "Docs: how to use a Linux command, package manager or installed tool. Example: 'how do I delete a folder with rm'.\n"
+                "Web: recent events, news, prices, versions, anything that changes over time. Example: 'who is the current champion'.\n"
+                "History: refers to what was said earlier in this conversation. Example: 'make that shorter'.")
 TASKS = {
     "done": dict(system=SYSTEM_DONE, options=["YES", "NO"], text="Does the evidence show that the task is completely and correctly done?"),
-    "route": dict(system=None, options=["NONE", "DOCS", "WEB", "HISTORY"], text=None),      # system comes from router.CLASSIFY_SYSTEM
+    # the labels the model sees are ONE token each (NONE/DOCS/HISTORY are split into pieces by the tokenizer and score badly); the options returned keep the data's names
+    "route": dict(system=SYSTEM_ROUTE, options=["NONE", "DOCS", "WEB", "HISTORY"], labels=["None", "Docs", "Web", "History"], text=None),
     "mixer": dict(system=SYSTEM_MIXER, options=["fast", "medium", "slow"], text="Which model should answer this request?"),
 }
+for _t in TASKS.values():
+    _t.setdefault("labels", list(_t["options"]))
 KINDS = {"yesno": ["YES", "NO"], "score": ["1", "2", "3", "4", "5"]}
 
 
 def resolve(q):
-    """-> (task name or None, system prompt, options, question text)."""
+    """-> (task name or None, system prompt, options, question text, labels shown to the model)."""
     t = TASKS.get(q.get("task"))
     if t:
-        system = t["system"]
-        if system is None:
-            import router
-            system = router.CLASSIFY_SYSTEM
-        return q["task"], system, list(t["options"]), q.get("text") or t["text"] or ""
+        return q["task"], t["system"], list(t["options"]), q.get("text") or t["text"] or "", list(t["labels"])
     opts = q.get("options") or KINDS.get(q.get("kind", ""))
     assert opts, f"question without options: {q}"
-    return None, q.get("system", "Answer with one of the options. Do not explain."), list(opts), q.get("text", "")
+    return None, q.get("system", "Answer with one of the options. Do not explain."), list(opts), q.get("text", ""), list(opts)
 
 
 class LogprobBackend:
@@ -42,8 +46,8 @@ class LogprobBackend:
         self.engine, self.limit = engine, limit
 
     def probs(self, state, q):
-        _, system, opts, text = resolve(q)
-        p = self.engine.option_probs((state + "\n" + text).strip(), system, opts, limit=self.limit)
+        _, system, opts, text, labels = resolve(q)
+        p = self.engine.option_probs((state + "\n" + text).strip(), system, labels, limit=self.limit, strict=True)
         return dict(zip(opts, (float(x) for x in p)))
 
 
@@ -73,7 +77,7 @@ class EmbedBackend:
         return self
 
     def probs(self, state, q):
-        task, _, opts, text = resolve(q)
+        task = resolve(q)[0]
         W, b, mopts = self.models[task]
         z = self._vec([state])[0] @ W + b; z = np.exp(z - z.max()); z /= z.sum()
         return dict(zip(mopts, (float(x) for x in z)))

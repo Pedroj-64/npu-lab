@@ -337,16 +337,16 @@ function addApply(box, text) {    // an answer with SEARCH/REPLACE blocks: show 
   } catch (e) { toast(e.message); } };
   box.append(b);
 }
-const AG = { steps: 0, max: 12, ok: true };      // agent loop: the model proposes one action per reply; reads run alone, writes wait for a click
+const AG = { steps: 0, max: 12, ok: true, task: "" };      // agent loop: the model proposes one action per reply; reads run alone, writes wait for a click
 async function agentStep(box, text) {
   const say = (t, cls = "src") => { const d = mk("div", cls, t); box.append(d); $("log").scrollTop = 1e9; return d; };
   try {
-    let r = await api("/agent/run", { text, last_ok: AG.ok });
+    let r = await api("/agent/run", { text, last_ok: AG.ok, task: AG.task });
     if (r.needs_confirm) {
       const d = say(r.shown, "agent"), ask = mk("div", "row"), yes = mk("button", "b pri", "Do it"), no = mk("button", "b", "Stop the agent"); ask.append(yes, no); box.append(ask);
       const go = await new Promise(res => { yes.onclick = () => res(true); no.onclick = () => res(false); });
       ask.remove(); if (!go) { say("Agent stopped; nothing was changed."); return; }
-      r = await api("/agent/run", { text, confirm: true, last_ok: AG.ok }); d.remove();
+      r = await api("/agent/run", { text, confirm: true, last_ok: AG.ok, task: AG.task }); d.remove();
     }
     AG.ok = r.ok; say((r.ok ? "" : "Error: ") + r.shown, "agent");
     if (r.done) { say("Agent finished."); return; }
@@ -396,7 +396,7 @@ async function send(o = {}) {   // o: {prompt, docs, web, cloud} re-asks the sam
   if (abort) return;      // another click got in while we waited
   let release; TIDY = new Promise(r => release = r);
   const cloud = o.cloud ?? $("backend").value === "cloud";
-  if (!o.auto) { AG.steps = 0; AG.ok = true; }
+  if (!o.auto) { AG.steps = 0; AG.ok = true; AG.task = prompt; }
   if (o.prompt && !o.auto && HISTORY.length >= 2 && HISTORY[HISTORY.length - 2].content === prompt) HISTORY.splice(-2);
   if (!cloud && (!ST || ST.mode !== "llm")) { toast("Load a model first (or choose Cloud)"); release(); return; }
   if (!o.prompt) $("prompt").value = ""; const me = mk("div", "msg me", prompt); $("log").append(me);

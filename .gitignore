@@ -5,3 +5,4 @@ build/
 third_party/
 models/
 launcher/target/
+bench/agent_traces/
