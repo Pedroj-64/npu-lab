@@ -2,7 +2,7 @@
 each part, nothing changed in src/) splits the step into: NPU wait / NPU call overhead (from the engine's own PROF) / GPU steps of the DeltaNet and attention layers (they block until
 the result is back as NumPy, so the clock is honest) / the output head / CPU glue. A microbenchmark of an EMPTY CUDA-graph round trip (copy in, replay, synchronise, copy out) gives the
 fixed cost of one GPU step; what remains of the measured GPU step is compute plus the real data movement.
-usage: .venv/bin/python bench/step_breakdown.py --model models/qwen35_2b [--tokens 48] [--runs 3]    (NPU + GPU: run alone)   [measured with the degraded GPU]"""
+usage: .venv/bin/python bench/step_breakdown.py --model models/qwen35_2b [--tokens 48] [--runs 3]    (NPU + GPU: run alone)   [first run with the degraded GPU, rerun with the healthy one: see bench/FASE2.md]"""
 import argparse, json, os, sys, time
 for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
     os.environ.setdefault(v, "1")
@@ -99,7 +99,7 @@ nlin = sum(1 for L in m.layers if L["type"] == "linear_attention"); natt = len(m
 npu_total = mean("npu calls") + mean("output head (npu)")
 gpu_total = mean("gpu linear step") + mean("gpu attention step")
 tot = mean("wall"); sumparts = npu_total + gpu_total + mean("cpu glue")
-print(f"\n## {os.path.basename(a.model)} [medido, GPU degradada], {a.runs} runs x {a.tokens} tokens; {nlin} DeltaNet layers, {natt} attention layers")
+print(f"\n## {os.path.basename(a.model)} [measured; check `nvidia-smi -q -d PERFORMANCE` and `bench/block1_preflight.sh`: the GPU state is not detected here], {a.runs} runs x {a.tokens} tokens; {nlin} DeltaNet layers, {natt} attention layers")
 print("| part | ms/token | sd | % of step |\n|---|---:|---:|---:|")
 print(f"| NPU: wait for the weight stream | {mean('wait'):.1f} | {sd('wait'):.1f} | {mean('wait') / tot * 100:.0f} % |")
 print(f"| NPU: call overhead (prepare, submit, collect; layers + output head) | {npu_total - mean('wait'):.1f} | | {(npu_total - mean('wait')) / tot * 100:.0f} % |")

@@ -13,6 +13,7 @@ ap.add_argument("--model", default="models/qwen35_2b")
 ap.add_argument("--vram-gb", type=float, default=5.0)
 ap.add_argument("--tokens", type=int, default=32)
 ap.add_argument("--json", default="bench/prefix_reuse.jsonl")
+ap.add_argument("--control", action="store_true", help="validity control only: size L, pair 0, the SAME question 1 after a wipe must hit the disk cache")
 a = ap.parse_args()
 state_dir = tempfile.mkdtemp(prefix="npu_state_", dir=os.environ.get("TMPDIR", "/tmp"))
 os.environ["NPU_LAB_STATE"] = state_dir
@@ -56,9 +57,15 @@ def cmp(r, ref):
 
 
 rows = []
+if a.control:
+    system = SYS["L"]; q1, q2 = PAIRS[0]
+    shutil.rmtree(state_dir, ignore_errors=True); os.makedirs(disk.dir)
+    m.cache = disk; wipe(); first = ask(q1, system); files = len(os.listdir(disk.dir)); wipe(); same = ask(q1, system); wipe(); other = ask(q2, system)
+    print(f"CONTROL files on disk {files}; question 1 first {first['reread']}/{first['total']} tokens, again after wipe {same['reread']}/{same['total']} (prefill {same['prefill_s']:.2f}s), question 2 after wipe {other['reread']}/{other['total']}; same text {same['out'] == first['out']}, cos {cmp(same, first)['cos']:.5f}")
+    shutil.rmtree(state_dir, ignore_errors=True); sys.exit(0)
 for size, system in SYS.items():
     for pi, (q1, q2) in enumerate(PAIRS):
-        shutil.rmtree(state_dir, ignore_errors=True); os.makedirs(state_dir)
+        shutil.rmtree(state_dir, ignore_errors=True); os.makedirs(disk.dir)       # the StateCache folder is made in its constructor
         m.cache = None; wipe(); e1 = ask(q2, system)                                   # E1 cold
         wipe(); ask(q1, system); e2 = ask(q2, system)                                  # E2 warm, same process
         m.cache = disk; wipe(); ask(q1, system); wipe(); e3 = ask(q2, system)          # E3: only the disk cache survives

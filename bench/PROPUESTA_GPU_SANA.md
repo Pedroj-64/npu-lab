@@ -39,3 +39,33 @@ Hoy: solo NPU 9.10 ± 0.04 tok/s, 27.8 ± 1.0 W, 0.33 ± 0.01 tok/J (n=3, un pro
 3. **Reuso del prefijo estable:** es el lote D.
 4. **Kernel de 4 vectores para lotes de resúmenes independientes.** Es trabajo de NPU (`mv_i8_i8`, `ROADMAP.md`: "no se escribe sin tu OK"): criterio — con NV=4 el coste por vector baja de ~2.3x a <= 1.2x del de uno solo [estimado en ROADMAP], resultados idénticos bit a bit al kernel actual, y un lote de 4 resúmenes cortos tarda <= 1.5x lo de uno.
 5. **Mostrar la RAM del modelo antes de cargarlo.** [Leído en código] hoy la interfaz solo muestra "GPU memory the model may use (GB)"; no hay cifra por modelo. Criterio: la cifra mostrada (pesos en disco + VRAM + KV de la ventana elegida) a +-10 % de lo medido tras cargar (RSS + VRAM) en 0.8B, 2B y 4B.
+
+# Resultados del bloque 1 [medido, 13 oct 13:21-14:10; GPU sana; comprobación previa superada en cada etapa: 14.7-15.5 TFLOPS, P0, mem 5486 MHz]
+Crudos: `bench/energy_runs.jsonl`, `bench/step_breakdown.jsonl`, `bench/prefix_reuse.jsonl`; registro: `bench/.block1.log`, `bench/.block1_d.log`.
+
+**A. 4B con reparto 25 y 50 %:** velocidad +18 % y +60 % (4.99 y 6.76 tok/s frente a 4.23), tok/J igual (0.11), prefill igual (782 tok/s). **Por la regla de 5120 MiB no cumple ninguno** (pico 5277 y 5755 MiB; con 50 % el asignador de CUDA registró un OOM recuperado). El 4B se queda en 0 % con `vram_gb` 5.0; 25 % es decisión tuya (867 MiB libres). Detalle en `bench/ENERGY.md`.
+**B. Barrido 60-75 % del 2B [medido, 14:04-14:09, tras compilar los 15 kernels de NPU que faltaban con `scripts/build_matvec.py --shared4`, 80 s, CPU, `build/` ignorado por git].** Al principio el barrido fallaba: el motor exige un kernel de NPU por forma de matriz y reparto, y solo existían los de 0, 25 y 50 % (contradecía la idea de que el reparto es solo un parámetro). Con los kernels hechos (decode, n = 3, control del 50 % en la misma sesión):
+
+| reparto | tok/s | frente al 50 % | total W (GPU W) | tok/J | VRAM pico |
+|---|---:|---:|---:|---:|---:|
+| 50 % (control) | 13.60 ± 0.02 | - | 44.3 (16.2) | 0.307 ± 0.008 | 3825 MiB |
+| 60 % | 15.47 ± 0.12 | +13.8 % (15 desv.) | 50.3 (21.9) | 0.308 ± 0.007 | 3921 MiB |
+| 65 % | 16.98 ± 0.18 | +24.8 % (18 desv.) | 54.5 (26.5) | 0.312 ± 0.003 | 3971 MiB |
+| 70 % | 17.63 ± 0.18 | +29.6 % (22 desv.) | 58.5 (27.8) | 0.301 ± 0.007 | 4019 MiB |
+| 75 % | **18.19 ± 0.29** | **+33.7 %** (16 desv.) | 60.0 (28.6) | 0.303 ± 0.006 | 4067 MiB |
+
+**Criterios (S* mejor que el 50 %):** (1) velocidad >= 3 % y > 3 desviaciones de la diferencia: **CUMPLEN 60, 65, 70 y 75 %**; (2) tok/J no menor que el control menos su desviación (0.299): **CUMPLEN los cuatro** (0.301-0.312, margen estrecho en 70 y 75 %); (3) VRAM <= 5120 MiB, sin OOM: **CUMPLEN** (máximo 4067 MiB). (4) 5 prompts fijos, decode voraz, >= 98 % de tokens iguales a los del 0 % en los primeros 32 (`bench/share_equiv.py`): **NO CUMPLE ningún reparto, ni el 50 %**: 114 de 134 tokens iguales (0.851) con 0.5 y con 0.75; 4 de 5 textos idénticos, y el quinto (la función en Python) se separa del reparto 0 % en el token 12 con los tres repartos (cada uno escribe una continuación distinta: casi empate entre dos tokens, el GPU calcula parte en bf16 y la NPU en int8). Es decir, **cualquier reparto distinto de cero cambia ese texto**, también el 50 % que ya es el valor por defecto; el regreso no empeora al subir a 75 %. **Veredicto por la regla escrita:** mejora clara de velocidad (+34 % a 75 %) a igual tok/J y VRAM de sobra; el criterio (4) tal como se escribió no lo cumple ni la referencia, así que no discrimina entre 50 y 75 %: decisión de default tuya (propongo 75 %: 18.2 tok/s con 60 W y 4.1 GB). **No se probó** más de 75 % (la tendencia sigue subiendo ~+0.5 tok/s por 5 puntos y el consumo de la GPU sube de 16 a 29 W); y en esta sesión el control del 50 % dio 13.60 frente a 14.13-14.22 antes (-4 %), por eso el control es de la misma sesión. El 4B no se barrió: ya el 25 % rompe el hueco de 1 GB.
+**C. Lote A:** ver `bench/FASE2.md`. Las tres predicciones se cumplen; fusionar lanzamientos de DeltaNet no se recomienda (techo 4.4 % del paso).
+**D. Reuso del prefijo (2B y 4B), tamaño L (7270 tokens, estable ~6000):**
+| escenario (pregunta 2) | relee 2B | prefill 2B | relee 4B | prefill 4B |
+|---|---:|---:|---:|---:|
+| E1 frío | 7270 | 3.67 s | 7270 | 10.22 s |
+| E2 caliente, mismo proceso | **102** | **0.16 s (23x)** | **102** | **0.53 s (19x)** | 
+| E3 "proceso nuevo", solo disco | **7270 (no acierta)** | 3.75 s | **7270 (no acierta)** | 10.25 s |
+| E4 con extractos, caliente (frío 8023) | 855 | 0.57 s (frío 4.05) | 855 | 1.53 s (frío 11.01) |
+
+Tamaño S (modo proyecto real, 1263 tokens): E2 relee 239 (0.91 -> 0.22 s en el 2B, 4.1x; 2.14 -> 0.68 s en el 4B, 3.1x); E3 relee 1263 (no hay nada guardado: < 4096). En todos los escenarios y tamaños el texto es idéntico al frío (3 de 3 pares) y el coseno de logits es 1.00000.
+**Criterios (en L):** (1) E2 relee <= (L mod 1024) + pregunta + 64 y es >= 3x más rápido: **CUMPLE** (102 tokens; 19-23x). (2) Calidad: **CUMPLE** (coseno 1.00000, mismo texto). (3) La predicción de que el disco NO acierta con preguntas distintas: **CONFIRMADA**, con control de validez (`prefix_reuse.py --control`, 2B): el disco sí guardó (2 archivos) y la **misma** pregunta 1 tras borrar el proceso relee **4 de 7269 tokens en 0.11 s**, pero la pregunta 2 relee 7270 de 7270. (4) E4 relee solo el sufijo: **CUMPLE** (855 = 102 + ~750 de extractos y envoltorio; el 89 % del prompt se reutiliza).
+**Qué dice esto del repo (contradice la idea de "statecache entre dos preguntas sobre el mismo proyecto"):** `StateCache` guarda el estado al final del prompt completo, con la pregunta 1 dentro, así que solo ayuda a repetir el mismo prompt o a continuar el mismo hilo; **entre dos preguntas distintas solo reutiliza el caché en proceso, que se pierde al descargar el modelo o reiniciar**. Además el prefijo estable del modo proyecto (~1000 tokens de mapa + sistema) queda por debajo de `MIN_TOKENS` = 4096, así que ni siquiera se guardaría. Propuesta, sin hacer: guardar también el estado al final del prefijo estable (antes de la parte variable), con un mínimo menor que 4096 (el prefijo S de 1263 tokens se relee en 0.9-2.1 s: guardar y cargar cuesta ~1 s, así que el mínimo útil está cerca de 2000-3000 tokens [estimado]).
+**E. 1.7B:** no es ruido; NPU-only ~13 % más eficiente en decode, el Asistido +8 % más rápido (detalle en `bench/ENERGY.md`).
+**Errores míos durante el bloque:** `prefix_reuse.py` borraba la carpeta de la caché de estado y no la recreaba (fallo en L); lo corregí, repetí toda la etapa D y se descartaron las filas parciales. `step_breakdown.py` imprimía fija la etiqueta "GPU degradada"; corregida.

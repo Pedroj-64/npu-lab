@@ -26,6 +26,22 @@ Criterios: (1) logits idénticos en 5 pasos fijos: **sí** en los dos modelos; (
 - El pegamento de CPU es 1 %; no merece trabajo.
 - No hay solapamiento posible dentro de un token (cada capa depende de la anterior): la GPU espera a la NPU y al revés.
 
+### Lote A repetido con la GPU sana [medido, 13 oct 13:30; P0, 15.2-15.3 TFLOPS; `bench/step_breakdown.py`, 3 corridas x 48 tokens, reparto 0 %; filas con `gpu_state` en `bench/step_breakdown.jsonl`]
+Criterios del lote A original: (1) logits idénticos en 5 pasos fijos: **sí** en 2B y 4B; (2) las partes suman el paso (110.3 frente a 110.5 ms, 232.1 frente a 232.3): **sí**; (3) desviación del total 0.4 ms (0.4 %) y 4.7 ms (2.0 %): **sí**; (4) cota medida: abajo.
+
+| parte del paso | 2B ms (%) degradada -> sana | 4B ms (%) degradada -> sana |
+|---|---|---|
+| NPU: espera del flujo de pesos | 88.0 (65 %) -> **88.2 (80 %)** | 195.5 (67 %) -> **194.0 (84 %)** |
+| NPU: coste de llamadas | 10.4 (8 %) -> 10.7 (10 %) | 20.3 (7 %) -> 18.6 (8 %) |
+| GPU: pasos DeltaNet | 28.0 (21 %) -> **4.9 (4 %)** | 64.2 (22 %) -> **10.2 (4 %)** |
+| GPU: pasos de atención | 7.7 (6 %) -> 4.7 (4 %) | 9.9 (3 %) -> 6.6 (3 %) |
+| CPU: pegamento | 1.7 (1 %) -> 1.8 (2 %) | 3.0 (1 %) -> 2.7 (1 %) |
+| paso total | 136.0 -> **110.5** | 293.1 -> **232.3** |
+
+**Predicciones escritas antes de medir (`bench/PROPUESTA_GPU_SANA.md`, C): las tres se cumplen.** (i) DeltaNet 2B: 28.0 -> 4.9 ms (<= 14 pedido); (ii) coste de llamadas NPU sin cambio (10.4 -> 10.7 ms, +3 %; 20.3 -> 18.6, -8 %); (iii) espera de la NPU sin cambio (88.0 -> 88.2; 195.5 -> 194.0). La degradación de la GPU explicaba **casi todo** el 21-22 % de DeltaNet y el paso de 136 a 110 ms; con GPU sana el decode del 2B queda limitado por el flujo de pesos de la NPU (80-84 % del paso).
+**Cota sobre fusionar lanzamientos de DeltaNet:** repetir los 18 (24) grafos de DeltaNet sin copias cuesta 3.4 ms (7.7 ms) por token, frente a 4.9 ms (10.2 ms) medidos: lo que queda (copias, sincronización, 271 us por paso en el 2B y 426 us en el 4B; el viaje vacío son 23 us) es **<= 1.5 ms (2B) y <= 2.5 ms (4B) por token**, es decir **<= 1.4 % y <= 1.1 % del paso**, y aun eliminando por completo los pasos DeltaNet de la GPU el techo es 4.9 ms = 4.4 % (2B) y 10.2 ms = 4.4 % (4B). **Criterio escrito: se recomienda fusionar solo si el ahorro máximo es >= 5 % del paso: NO se recomienda** (queda una vez por token un perfil de 1152 núcleos / 306 lanzamientos en el 2B y 1584 / 408 en el 4B; la suma de tiempos de núcleo es 4.1 ms y 9.7 ms).
+**Lo que sí queda accionable:** las llamadas a la NPU (10.7 ms = 10 % en el 2B) y, sobre todo, el flujo de pesos (80-84 %), que solo baja con menos bytes por token (int4 calibrado, cabeza pequeña) o más ancho de banda.
+
 ## Lote B. `NPU_FAST_VOCAB` en Qwen3.5 (bandera apagada por defecto)
 **Qué cambia (tras bandera `NPU_FAST_VOCAB=1` o `fast_head=True`, solo con reparto de GPU 0 %):** la cabeza de salida de la NPU se calcula sobre 38 912 de los 248 320 tokens (4 trozos de 9 728 filas, ya compilados) en lugar de todo el vocabulario: ~429 MB menos por token en el 2B (la cabeza pesa 509 MB de 1885 MB). El subconjunto se elige con la misma función que el motor denso (`fast_vocab`: frecuencia en el índice de documentos y en las traducciones del sistema, todos los símbolos y los 256 bytes) pero con **caché propia por tokenizador**, porque Qwen3 y Qwen3.5 solo comparten 281 ids de token [medido] y la caché antigua se valida solo por longitud (con 38 912 entradas una caché de Qwen3 pasaría por válida para Qwen3.5: error silencioso). Sin bandera, el código es el de antes.
 **Criterio de éxito (fijado antes de medir):** se recomienda pasar a "opcional visible" si se cumplen TODOS:
