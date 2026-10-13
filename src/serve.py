@@ -53,6 +53,8 @@ class State:
     def unload(self):
         self.engine, self.mode, self.model = None, "none", None
         gc.collect()                              # drops pyxrt contexts/buffers -> NPU is free again
+        if "torch" in sys.modules and sys.modules["torch"].cuda.is_available():
+            sys.modules["torch"].cuda.empty_cache()   # a failed or unloaded model must give its VRAM back to the driver
 
     def load_index(self):
         import search
@@ -265,6 +267,10 @@ def set_mode(mode, model=None, device="npu"):
             import search
             S.engine, S.mode, S.model = search.make_model(device), "search", device
             S.load_index()
+    except BaseException as e:
+        import traceback; traceback.clear_frames(e.__traceback__)      # frames of the failed load hold its tensors
+        S.unload()                                    # a half-loaded model (e.g. CUDA out of memory) must not keep the GPU
+        raise
     finally:
         S.npu_lock.release()
 
