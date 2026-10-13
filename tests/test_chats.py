@@ -34,7 +34,7 @@ import http.client, json, subprocess
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); T = "t" * 43
 tmp = tempfile.mkdtemp()
 p = subprocess.Popen([sys.executable, "-u", os.path.join(ROOT, "src", "serve.py")], cwd=ROOT, stdout=subprocess.PIPE, text=True,
-                     env={**os.environ, "NPU_LAB_TOKEN": T, "NPU_LAB_RULES": tmp + "/rules.json", "NPU_LAB_CHATS": tmp + "/c", "NPU_LAB_DOCS": tmp + "/d", "NPU_LAB_ROUTING": tmp + "/r.json", "NPU_LAB_SETTINGS": tmp + "/s.json"})
+                     env={**os.environ, "NPU_LAB_TOKEN": T, "NPU_LAB_RULES": tmp + "/rules.json", "NPU_LAB_CHATS": tmp + "/c", "NPU_LAB_FACTS": tmp + "/f.json", "NPU_LAB_DOCS": tmp + "/d", "NPU_LAB_ROUTING": tmp + "/r.json", "NPU_LAB_SETTINGS": tmp + "/s.json"})
 try:
     port = json.loads(p.stdout.readline())["port"]
     def call(path, body=None):
@@ -48,6 +48,7 @@ try:
     assert call("/chats/load", {"id": "nope00"})[0] == 400
     assert call("/rules", {"save_chats": True})[1]["save_chats"] is True
     assert call("/chats/delete", {"id": "web001"}) == (200, {"chats": []})
+    assert call("/facts") == (200, {"facts": []}) and call("/facts", {"facts": [" a  b ", ""]}) == (200, {"facts": ["a b"]}) and call("/facts", {"facts": "x"})[0] == 400
     print("chats api ok")
 finally:
     p.terminate()

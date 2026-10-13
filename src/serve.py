@@ -8,7 +8,7 @@ Security model: binds 127.0.0.1 on a random port; every API request needs `Autho
 URL fragment, which never reaches the server); the Host header must be loopback; an Origin header is only
 accepted if it is this server's own origin; no CORS headers; only whitelisted models; folders only under $HOME.
 
-API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /chats /doctor /settings   POST /routing /chats/save /chats/load /chats/delete /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
+API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /chats /facts /doctor /settings   POST /routing /facts /chats/save /chats/load /chats/delete /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
 """
 import gc, hmac, json, os, secrets, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -418,6 +418,9 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/rules":
             import search
             self._send(200, search.rules())
+        elif self.path == "/facts":
+            import facts
+            self._send(200, {"facts": facts.load()})
         elif self.path == "/chats":
             import chats
             self._send(200, {"chats": chats.listing()})
@@ -449,6 +452,12 @@ class H(BaseHTTPRequestHandler):
             except documents.DocError as e:
                 raise Bad(400, str(e))
             self._send(200, {"documents": documents.listing()})
+        elif self.path == "/facts":
+            import facts
+            try:
+                self._send(200, {"facts": facts.save(d.get("facts"))})
+            except ValueError as e:
+                raise Bad(400, str(e))
         elif self.path in ("/chats/save", "/chats/load", "/chats/delete"):
             import chats
             try:
@@ -581,7 +590,7 @@ class H(BaseHTTPRequestHandler):
                         self._line({kind: piece})
                     self._line({"done": True, "stats": {"backend": "cloud", "seconds": round(time.time() - t0, 1)}})
                 else:
-                    for piece in S.engine.stream(prompt, n, ctx or None, history, lambda name, **kw: self._line({"phase": name, **kw})):
+                    for piece in S.engine.stream(prompt, n, ctx or None, history, lambda name, **kw: self._line({"phase": name, **kw}), system=__import__("facts").as_system(__import__("qwen_npu").SYSTEM)):
                         self._line({"token": piece})
                     self._line({"done": True, "stats": {"backend": "local", **S.engine.stats}})
             except (BrokenPipeError, ConnectionResetError):

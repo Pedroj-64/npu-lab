@@ -101,6 +101,9 @@
       <label title="Off by default. Chats are stored as files on this PC only."><input type="checkbox" id="savechats"> save chats on this PC</label>
       <select id="chatlist"></select><button class="b" id="openchat">Open</button><button class="b" id="delchat">Delete</button><button class="b" id="exportchat" title="Download this chat as Markdown">Export .md</button>
     </div>
+    <details style="margin-top:8px"><summary class="dim">Remembered facts (added to what the local model knows about you; never sent to the cloud)</summary>
+      <textarea id="facts" rows="4" placeholder="One per line, e.g. I use CachyOS with fish. I prefer short answers." style="width:100%;margin-top:6px"></textarea>
+      <div class="row" style="margin-top:6px"><button class="b" id="savefacts">Save facts</button><span class="dim" id="factsnote">up to 30 lines of 200 characters</span></div></details>
     <div class="row" style="margin-top:8px">
       <label>local docs <select id="usedocs"><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label><span class="dim" id="docsinfo"></span>
       <label>web search <select id="useweb"><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label>
@@ -331,6 +334,7 @@ async function saveChat() {
   if (!CHAT_TITLE) CHAT_TITLE = HISTORY[0].content.slice(0, 80);
   try { await api("/chats/save", { id: CHAT_ID, title: CHAT_TITLE, history: HISTORY }); refreshChats(); } catch (e) { toast(e.message); }
 }
+$("savefacts").onclick = async () => { try { const r = await api("/facts", { facts: $("facts").value.split("\n") }); $("facts").value = r.facts.join("\n"); $("factsnote").textContent = `saved ${r.facts.length} facts; used from the next question`; } catch (e) { toast(e.message); } };
 $("savechats").onchange = async () => { try { await api("/rules", { save_chats: $("savechats").checked }); } catch (e) { toast(e.message); } if ($("savechats").checked) saveChat(); };
 $("openchat").onclick = async () => {
   if (abort) { toast("Wait for the answer to finish"); return; }
@@ -504,7 +508,7 @@ addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("chatcard")
   show("setup");
   try { const s = await api("/status"); for (const m of s.models) $("llmsel").append(new Option(({ qwen35s: "Qwen3.5-0.8B · fast (Assisted)", qwen35m: "Qwen3.5-2B · medium (Assisted)", qwen35l: "Qwen3.5-4B · quality, slow (Assisted)", qwen3: "Qwen3-1.7B · medium (NPU only ok)", qwen3s: "Qwen3-0.6B · fast (NPU only ok)" })[m] || m, m)); $("llmsel").value = s.models.includes("qwen35m") ? "qwen35m" : s.models.includes("qwen3") ? "qwen3" : s.models[0];
     { const rl = await api("/rules"); $("roots").value = rl.roots.join("\n"); $("vram").value = rl.llm_vram_gb ?? 4.0; $("ctxwin").value = rl.context_tokens ?? 80000; $("compact").value = Math.round((rl.compact_at ?? 0.7) * 100); $("gshare").value = String(rl.gpu_share ?? 0); $("scache").value = rl.state_cache_gb ?? 8; } } catch (e) { toast(e.message); }
-  await loadSettings(); api("/rules").then(r => { $("savechats").checked = !!r.save_chats; }).catch(() => {}); refreshChats(); doctor(); refresh(); pollDocs().catch(() => {}); setInterval(refresh, 1500);
+  await loadSettings(); api("/rules").then(r => { $("savechats").checked = !!r.save_chats; }).catch(() => {}); api("/facts").then(r => { $("facts").value = r.facts.join("\n"); }).catch(() => {}); refreshChats(); doctor(); refresh(); pollDocs().catch(() => {}); setInterval(refresh, 1500);
 })();
 </script>
 </body>
