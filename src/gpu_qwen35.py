@@ -15,8 +15,9 @@ import torch
 import torch.nn.functional as F
 
 DEV = "cuda"
-CHUNK = 2048
+CHUNK = 1024          # prompt tokens per GPU pass: same speed as 2048 (5.3 s vs 5.2 s per 4096 tokens, 4B) with half the activation memory (355 vs 708 MiB)
 RESERVE = 0.7e9
+OVERHEAD = 1.05e9      # what a card needs beyond llm_vram_gb: CUDA context + prefill activations (~0.6 GiB measured, bench/vram_peak.py) + decode CUDA graphs (~0.65 GiB with the 4B)
 QBLOCK = 512
 MIN_CTX = 2048
 MAX_SNAPSHOTS = 48
@@ -120,6 +121,8 @@ def chunk_gated_delta_rule(query, key, value, g, beta, initial_state, chunk_size
 class GpuCore35:
     def __init__(self, c, w, prefix, max_ctx, vram_gb=4.0, int8=None):
         self.c = c
+        cap = (torch.cuda.mem_get_info()[1] - OVERHEAD) / 1e9          # a budget above this runs out of memory when the first decode graphs are captured
+        self.vram_asked, vram_gb = vram_gb, min(vram_gb, cap)
         self.H, self.NL, self.eps = c["hidden_size"], c["num_hidden_layers"], c["rms_norm_eps"]
         self.NH, self.NKV, self.HD = c["num_attention_heads"], c["num_key_value_heads"], c["head_dim"]
         self.Nk, self.Nv, self.Dk, self.Dv = c["linear_num_key_heads"], c["linear_num_value_heads"], c["linear_key_head_dim"], c["linear_value_head_dim"]
