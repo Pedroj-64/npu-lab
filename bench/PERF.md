@@ -102,3 +102,6 @@ El **~410 µs citado en el código es el cambio de CONTEXTO (xclbin distinto), y
 - Techo teórico de todo el coste fijo de llamadas: 113 llamadas × ~105 µs ≈ 11.9 ms por token, el 22 % de los 54.5 ms del 0.6B y el 11 % de los 111 ms del 1.7B **[estimado]**; en la práctica los envíos se solapan (`submit` medido: 5.7 ms) y las llamadas restantes no se pueden fundir por dependencia de datos. Fundir la cabeza de salida (16 trozos) es otro asunto, ya en el ROADMAP ("Fewer launches").
 - En el prefill las llamadas son grandes: el envío (`submit`) es el 1-2 % del tiempo (§8.2), así que fundir gate y up allí ganaría <2 % **[estimado a partir de §8.2]**.
 - Decisión: no se implementa; queda registrado en `docs/DECISIONS.md`.
+
+## 9. Corrección de la Fase 2 (13 oct 2026)
+El techo de DMA de la §2 mide copia con lectura y escritura; la Fase 2 midió la lectura pura con la misma topología del decode: 6.6 / 12.3 / 21.8 GB/s (1 / 2 / 4 columnas) y el kernel real tarda lo mismo que el diseño sin cálculo (r = 0.97-1.03). Ver `bench/DMA_READ.md`. Conclusión de §3 confirmada: el tramo NPU del decode está en el techo de DMA.
