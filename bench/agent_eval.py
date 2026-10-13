@@ -15,14 +15,14 @@ READ path                  show a file
 LIST                       list the project files
 DELETE path                delete a file
 DONE one-line summary      you are finished
-or to edit or create a file, a block (the path on the line before it):
-path/file.py
+or to edit or create a file, a block (the path on the line before it, written as in the project map, for example models.py):
+models.py
 <<<<<<< SEARCH
 (lines copied exactly from the current file; leave empty to create a new file)
 =======
 (the new lines)
 >>>>>>> REPLACE
-You will see the result of each action. Read a file before editing it. Edit one place per reply."""
+You will see the result of each action. Read a file before editing it: the lines you search for must be copied from what READ showed. Edit one place per reply. DONE is refused if your last action failed or a file no longer compiles."""
 LEGACY = '"""Old helpers nobody uses."""\n\n\ndef old():\n    return 0\n'
 TASKS = {
     1: ("In util.py make clamp raise ValueError when lo is greater than hi.",
@@ -63,7 +63,13 @@ def act(root, reply):
     if "<<<<<<< SEARCH" in text:
         res = project.apply(root, text)
         bad = [r for r in res if r["action"] in ("failed", "none")]
-        return (not bad, "; ".join(f"{r['action']} {r['file']}" + (f" ({r['error']})" if r["error"] else "") for r in res), False)
+        shown = "; ".join(f"{r['action']} {r['file']}" + (f" ({r['error']})" if r["error"] else "") for r in res)
+        if bad and bad[-1]["error"].startswith("SEARCH text found"):          # show the real file, so the next reply can copy the lines exactly
+            try:
+                shown += f"\nThe file {bad[-1]['file']} currently contains:\n" + open(project._safe(root, bad[-1]["file"], True), encoding="utf-8").read()[:3000]
+            except (ValueError, OSError, UnicodeDecodeError):
+                pass
+        return (not bad, shown, False)
     m = re.match(r"\s*(READ|LIST|DELETE|DONE)\b[ \t]*([^\n]*)", text)
     if not m:
         return False, "not an action: reply with READ, LIST, DELETE, DONE or an edit block", False
@@ -82,16 +88,34 @@ def act(root, reply):
         return False, f"{verb} failed: {e}", False
 
 
+def compile_error(root):
+    """First syntax error among the project's .py files, or ''."""
+    for d, subs, fs in os.walk(root):
+        for f in sorted(fs):
+            if f.endswith(".py"):
+                try:
+                    compile(open(os.path.join(d, f), encoding="utf-8").read(), f, "exec")
+                except (SyntaxError, ValueError) as e:
+                    return f"{f} does not compile: {e}"
+    return ""
+
+
 def run_task(tid, ask, steps):
     """-> (solved, valid calls, total calls, log)."""
     root = tempfile.mkdtemp(dir=os.path.expanduser("~"))
     try:
         make_project(root)
         msg = f"{PROTOCOL}\n\nProject map:\n{repomap.build(root, 2500)}\n\nTask: {TASKS[tid][0]}"
-        valid = total = 0; log = []
+        valid = total = 0; log = []; last_ok = True
         for _ in range(steps):
             reply = ask(msg); total += 1
             ok, shown, done = act(root, reply)
+            if done:                                            # the model's own "I am finished" is not trusted: the harness looks first
+                why = "" if last_ok else "your last action failed; fix it first"
+                why = why or compile_error(root)
+                if why:
+                    ok, shown, done = False, f"DONE refused: {why}", False
+            last_ok = ok
             valid += ok; log.append(("ok " if ok else "BAD") + " " + reply.split("</think>")[-1].strip().replace("\n", " | ")[:90])
             if done:
                 break
@@ -110,8 +134,16 @@ def check():
         assert solved and valid == total, log
     nothing = run_task(1, lambda m: "DONE nothing", 3)       # an agent that does nothing must NOT pass any check
     assert not nothing[0]
-    garbage = iter(["hello", "READ ../../etc/passwd", "DELETE /etc/passwd", "DONE"])
-    g = run_task(1, lambda m: next(garbage), 5); assert g[1] == 1 and g[2] == 4 and not g[0], g       # three refused/invalid replies, only the final DONE counts
+    garbage = iter(["hello", "READ ../../etc/passwd", "DELETE /etc/passwd", "READ util.py", "DONE"])
+    g = run_task(1, lambda m: next(garbage), 6); assert g[1] == 2 and g[2] == 5 and not g[0], g       # three refused replies; the READ and the final DONE count
+    failed_done = iter(["DELETE nothere.py", "DONE all good", "LIST", "DONE ok"])
+    f = run_task(1, lambda m: next(failed_done), 6); assert (f[1], f[2]) == (2, 4), f                   # a DONE right after a failed action is refused
+    broken = iter([B("bad.py", "", "def (:"), "DONE x", "DELETE bad.py", "DONE y"])
+    b = run_task(1, lambda m: next(broken), 6); assert (b[1], b[2]) == (3, 4), b                         # a file that no longer compiles blocks DONE
+    miss = iter(["READ util.py", B("util.py", "return nothing", "x"), "LIST", "DONE"])
+    shown = []
+    run_task(1, lambda m: (shown.append(m), next(miss))[1], 5)
+    assert any("currently contains" in m and "def clamp" in m for m in shown), shown                    # a mismatch shows the real file
     print("agent harness ok")
 
 
