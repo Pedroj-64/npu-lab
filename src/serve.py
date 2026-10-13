@@ -10,7 +10,7 @@ accepted if it is this server's own origin; no CORS headers; only whitelisted mo
 
 API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /chats /facts /doctor /settings   POST /routing /facts /agent/run /project/apply /chats/save /chats/load /chats/delete /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
 """
-import gc, hmac, json, os, re, secrets, sys, threading, time
+import gc, hmac, json, os, re, secrets, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +18,57 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Qwen3.5 (hybrid) needs the GPU: Assisted profile only. Qwen3 (dense) also runs NPU only.
 MODELS = {"qwen35s": "models/qwen35_08b", "qwen35m": "models/qwen35_2b", "qwen35l": "models/qwen35_4b", "qwen3s": "models/qwen3s", "qwen3": "models/qwen3"}
 NEEDS_GPU = ("qwen35s", "qwen35m", "qwen35l")   # whitelist: the API never takes a path
+SHARES = {"qwen35s": (0.0, 0.25, 0.5), "qwen35m": (0.0, 0.25, 0.5, 0.75), "qwen35l": (0.0, 0.25)}   # GPU shares with a measured fit per model (bench/ENERGY.md); the NPU kernels are built per share
+DEFAULT_SHARE = {"qwen35m": 0.5}                                                                       # everything else: 0 (NPU only)
+
+
+# Peak GPU memory (MiB, nvidia-smi) per model and share, measured with llm_vram_gb 5.0 and a 12000-token window (bench/ENERGY.md, bench/PROPUESTA_GPU_SANA.md). Missing entry: only the check after loading applies.
+PEAK_MIB = {("qwen35m", 0.0): 3401, ("qwen35m", 0.25): 3583, ("qwen35m", 0.5): 3825, ("qwen35m", 0.75): 4067, ("qwen35l", 0.0): 5057, ("qwen35l", 0.25): 5277, ("qwen35l", 0.5): 5755}
+ACT_MIB = 400                    # prompt-reading activations on top of what is resident after loading (355 MiB measured on the 4B)
+DEFAULT_VRAM_MARGIN_MIB = 700    # GPU memory kept free for the desktop; the user decides the final value (Settings)
+BUILD_CMD = "python scripts/build_matvec.py --shared4 $(python src/qwen35_npu.py --model {dir} --shapes --share {share})"     # ~80 s on this machine
+
+
+def missing_kernels(model, share, build_dir=None):
+    """Names of the NPU kernels that still have to be built for `model` at GPU share `share` ([] = ready). Nothing is run."""
+    import qwen35_npu
+    cfg = json.load(open(os.path.join(ROOT, MODELS[model], "config.json")))
+    bd = build_dir or os.path.join(ROOT, "build/c4")
+    return [n for n in (f"c4_{m}x{k}" for m, k in qwen35_npu.shapes(qwen35_npu.text_config(cfg), share)) if not os.path.exists(os.path.join(bd, n + ".xclbin"))]
+
+
+def free_vram_mib():
+    try:
+        return int(subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10).stdout.split()[0])
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None               # no NVIDIA tools: nothing to check
+
+
+def vram_refusal(model, share, margin_mib, free_mib):
+    """Message when loading `model` at `share` would leave less than `margin_mib` free for the desktop (from the measured peak), else None."""
+    pk = PEAK_MIB.get((model, share))
+    if free_mib is None or pk is None or free_mib - pk >= margin_mib:
+        return None
+    return (f"Not loaded: {model} at a {share:.0%} GPU share peaks at ~{pk} MiB of GPU memory (measured) and only {free_mib} MiB are free, which would leave {free_mib - pk} MiB for the desktop "
+            f"(your margin is {margin_mib:.0f} MiB). Pick a lower GPU share, close programs that use the GPU, or lower the margin in Settings.")
+
+
+def rules_view():
+    """What GET /rules returns: the rules plus, per model, the effective share, the allowed shares and which shares still need NPU kernels (so the page can warn)."""
+    import search
+    rl = search.rules(); kern = {}
+    for m, sh in SHARES.items():
+        if os.path.exists(os.path.join(ROOT, MODELS[m], "config.json")):
+            kern[m] = {str(x): len(missing_kernels(m, x)) for x in sh}
+    return {**rl, "gpu_share_effective": {m: share_of(m, rl) for m in SHARES}, "gpu_share_allowed": SHARES, "gpu_share_kernels_missing": kern,
+            "gpu_share_build_cmd": {m: BUILD_CMD.replace("{dir}", MODELS[m]) for m in SHARES}, "vram_margin_mib": rl.get("vram_margin_mib", DEFAULT_VRAM_MARGIN_MIB)}
+
+
+def share_of(model, rl):
+    """GPU share of decoding for `model`: the user's choice in rules["gpu_share"][model], else the measured default. A scalar from an older rules file is ignored (it used to apply to every model)."""
+    v = rl.get("gpu_share")
+    v = v.get(model) if isinstance(v, dict) else None
+    return float(DEFAULT_SHARE.get(model, 0.0) if v is None else v)
 PROFILES = ("npu_only", "assisted")                           # assisted: GPU/CPU may help bulk indexing
 MAX_BODY, CHAT_BODY, MAX_TOKENS = 64 * 1024, 16 * 1024 * 1024, 4096     # a chat request may carry a whole long conversation or document
 DEFAULT_CONTEXT = 80000                                                    # tokens; the window actually used is cut to what fits in the GPU memory limit
@@ -101,10 +152,15 @@ def set_rules(d):
             raise Bad(400, "state_cache_gb must be between 0 (off) and 100")
         r["state_cache_gb"] = v
     if "gpu_share" in d:
-        v = float(d["gpu_share"])
-        if v not in (0.0, 0.25, 0.5):
-            raise Bad(400, "gpu_share must be 0 (NPU only), 0.25 or 0.5")
-        r["gpu_share"] = v
+        g = d["gpu_share"]
+        if not isinstance(g, dict) or any(k not in SHARES or v not in SHARES[k] for k, v in g.items()):
+            raise Bad(400, "gpu_share must be an object {model: share}; allowed: " + ", ".join(f"{k} {list(v)}" for k, v in SHARES.items()))
+        r["gpu_share"] = {**(r["gpu_share"] if isinstance(r.get("gpu_share"), dict) else {}), **{k: float(v) for k, v in g.items()}}
+    if "vram_margin_mib" in d:
+        v = d["vram_margin_mib"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 3000:
+            raise Bad(400, "vram_margin_mib must be between 0 and 3000")
+        r["vram_margin_mib"] = float(v)
     if "compact_at" in d:
         a = float(d["compact_at"])
         if not (a == 0 or 0.3 <= a <= 0.95):
@@ -188,7 +244,7 @@ def doctor():
             cfg = json.load(open(os.path.join(ROOT, d, "config.json")))
             import qwen35_npu
             import search as _s
-            share = float(_s.rules().get("gpu_share", 0.0))
+            share = share_of(name, _s.rules())
             need = [f"c4_{m}x{k}" for m, k in (qwen35_npu.shapes(qwen35_npu.text_config(cfg), share) if name in NEEDS_GPU else shapes(cfg))]
             miss = [n for n in need if not os.path.exists(os.path.join(ROOT, "build/c4", n + ".xclbin"))]
             add(f"kernels_{name}", not miss, "all built" if not miss else f"{len(miss)} missing",
@@ -271,8 +327,19 @@ def set_mode(mode, model=None, device="npu"):
             if model in NEEDS_GPU and S.profile != "assisted":
                 raise Bad(409, "Qwen3.5 models use the GPU for prompt reading and attention: switch to the Assisted profile (or pick a Qwen3 model for NPU only)")
             rl = search.rules()
+            margin = float(rl.get("vram_margin_mib", DEFAULT_VRAM_MARGIN_MIB))
+            if model in NEEDS_GPU:
+                share = share_of(model, rl); miss = missing_kernels(model, share)
+                if miss:
+                    raise Bad(409, f"{len(miss)} NPU kernels are missing for {model} at a {share:.0%} GPU share (~80 s to build): " + BUILD_CMD.replace("{dir}", MODELS[model]).replace("{share}", str(share)))
+                msg = vram_refusal(model, share, margin, free_vram_mib())
+                if msg:
+                    raise Bad(409, msg)
             # assisted: the GPU reads prompts and holds the KV cache / DeltaNet state; the NPU still generates every token
-            S.engine, S.mode, S.model = load_engine(MODELS[model], gpu=S.profile == "assisted", max_ctx=int(rl.get("context_tokens", DEFAULT_CONTEXT)), vram_gb=float(rl.get("llm_vram_gb", 4.0)), gpu_share=float(rl.get("gpu_share", 0.0)), cache_gb=float(rl.get("state_cache_gb", 8.0))), "llm", model
+            S.engine, S.mode, S.model = load_engine(MODELS[model], gpu=S.profile == "assisted", max_ctx=int(rl.get("context_tokens", DEFAULT_CONTEXT)), vram_gb=float(rl.get("llm_vram_gb", 4.0)), gpu_share=share_of(model, rl), cache_gb=float(rl.get("state_cache_gb", 8.0))), "llm", model
+            left = free_vram_mib() if model in NEEDS_GPU else None
+            if left is not None and left - ACT_MIB < margin:                # the failure path below unloads what was just loaded
+                raise Bad(409, f"Unloaded: after loading {model} only {left} MiB of GPU memory are free and reading a long prompt needs ~{ACT_MIB} MiB more; your margin for the desktop is {margin:.0f} MiB. Lower the GPU share, the memory limit or the context window.")
         elif mode == "search":
             if device not in ("npu", "gpu", "cpu"):
                 raise Bad(400, "device must be npu|gpu|cpu")
@@ -452,8 +519,7 @@ class H(BaseHTTPRequestHandler):
             import documents
             self._send(200, {"documents": documents.listing(), "job": S.docjob})
         elif self.path == "/rules":
-            import search
-            self._send(200, search.rules())
+            self._send(200, rules_view())
         elif self.path == "/facts":
             import facts
             self._send(200, {"facts": facts.load()})
@@ -717,6 +783,10 @@ def watch_parent():
 
 
 def main():
+    root = os.environ.get("NPU_LAB_STATE") or os.path.expanduser("~/.cache/npu-lab/state")
+    if os.path.isdir(root):                                    # states saved by an older version had the default permissions
+        import statecache
+        statecache.lock_down(root)
     if os.environ.get("NPU_LAB_WATCH_STDIN") == "1":
         watch_parent()
     srv = ThreadingHTTPServer(("127.0.0.1", 0), H)

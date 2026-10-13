@@ -74,7 +74,7 @@ FILLER = ["Write one sentence about why backups matter.", "Give me a one-line sh
 fails = []
 try:
     assert call("/profile", {"profile": "assisted"})[0] == 200
-    assert call("/rules", {"context_tokens": WINDOW, "llm_vram_gb": 5.0, "gpu_share": 0.0, "compact_at": 0.7})[0] == 200
+    assert call("/rules", {"context_tokens": WINDOW, "llm_vram_gb": 5.0, "gpu_share": {"qwen35m": 0.0, "qwen35l": 0.0}, "compact_at": 0.7})[0] == 200
     s, b = call("/mode", {"mode": "llm", "model": MODEL}, timeout=400)
     if s != 200:
         raise SystemExit(f"load failed: {b}")

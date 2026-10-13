@@ -72,7 +72,8 @@
       <label class="f">GPU memory the model may use (GB)<input type="number" id="vram" min="1" max="6" step="0.5" style="width:90px"></label>
       <label class="f">Context window (tokens)<input type="number" id="ctxwin" min="2048" max="262144" step="2048" style="width:120px"></label>
       <label class="f">Document cache on disk (GB, 0 = off)<input type="number" id="scache" min="0" max="100" step="1" style="width:90px"></label>
-      <label class="f">GPU share of decoding (Qwen3.5)<select id="gshare"><option value="0">0% · NPU only</option><option value="0.25">25%</option><option value="0.5">50%</option></select></label>
+      <label class="f">GPU share of decoding (the model chosen above)<select id="gshare"><option value="0">0% · NPU only</option><option value="0.25">25%</option><option value="0.5">50%</option><option value="0.75">75% · max speed</option></select></label>
+      <label class="f">GPU memory to leave free for the desktop (MiB)<input type="number" id="vmargin" min="0" max="3000" step="50" style="width:90px"></label>
       <label class="f">Compact the conversation at (% of window, 0 = off)<input type="number" id="compact" min="0" max="95" step="5" style="width:90px"></label>
       <button class="b" id="savelimits" style="align-self:flex-end">Save</button>
       <span class="dim" id="limitnote"></span></div>
@@ -80,7 +81,10 @@
       (Qwen3-1.7B: ~114 KB per token, so ~9k tokens in 5.5 GB; the hybrid Qwen3.5 models need ~12 KB per token). The window is cut to what fits and the model state shows the real size.
       Without the GPU the window is 4096 tokens.
       GPU share: the GPU computes that fraction of the rows of every Qwen3.5 layer matrix at the same time as the NPU (faster, but the GPU works and draws power; 0% keeps the NPU as the only worker of the weights).
-      It needs NPU kernels built for the share (the System check tells you the command).</div>
+      It needs NPU kernels built for the share (the System check tells you the command).
+      <span id="gsharenote" style="color:var(--warn,#c60)"></span>
+      Defaults: 2B 50%, everything else 0%. 2B at 75% (max speed): +34% decode speed over 50% (18.2 vs 13.6 tok/s), but the whole machine draws ~60 W instead of ~44 W and tokens/J stays ~0.30; measured, bench/ENERGY.md.
+      4B at 25%: +18% speed, but the GPU memory peak is 5277 MiB of 6144 (867 MiB left for the desktop; 0% leaves 1087 MiB). Shares are per model; the list only offers those with a measured fit.</div>
     <div class="dim" id="profnote" style="margin-top:8px"></div></div>
 </section>
 
@@ -316,7 +320,12 @@ async function doctor() {
       if (c.fix) d.append(mk("span", "fix", c.fix)); box.append(d); }
   } catch (e) { box.textContent = e.message; }
 }
-$("savelimits").onclick = async () => { try { await api("/rules", { llm_vram_gb: +$("vram").value, context_tokens: +$("ctxwin").value, compact_at: +$("compact").value / 100, gpu_share: +$("gshare").value, state_cache_gb: +$("scache").value }); $("limitnote").textContent = "saved; Unload and Load the model to apply"; } catch (e) { toast(e.message); } };
+function syncShare() { const rl = window.RULES, m = $("llmsel").value; if (!rl || !rl.gpu_share_allowed) return; const ok = rl.gpu_share_allowed[m] || [0], miss = (rl.gpu_share_kernels_missing || {})[m] || {}, notes = [];
+  for (const o of $("gshare").options) { const n = miss[o.value] || miss[String(+o.value)] || 0; o.disabled = !ok.includes(+o.value) || n > 0; o.textContent = o.textContent.replace(/ · kernels missing$/, "") + (ok.includes(+o.value) && n > 0 ? " · kernels missing" : "");
+    if (ok.includes(+o.value) && n > 0) notes.push(`${o.value * 100}%: ${n} NPU kernels are not built (about 80 s): ${rl.gpu_share_build_cmd[m].replace("{share}", o.value)}`); }
+  $("gshare").value = String(rl.gpu_share_effective[m] ?? 0); $("gsharenote").textContent = notes.join("  ·  "); }
+$("llmsel").addEventListener("change", syncShare);
+$("savelimits").onclick = async () => { try { await api("/rules", { llm_vram_gb: +$("vram").value, context_tokens: +$("ctxwin").value, compact_at: +$("compact").value / 100, gpu_share: { [$("llmsel").value]: +$("gshare").value }, state_cache_gb: +$("scache").value, vram_margin_mib: +$("vmargin").value }); window.RULES = await api("/rules"); syncShare(); $("limitnote").textContent = "saved; Unload and Load the model to apply"; } catch (e) { toast(e.message); } };
 document.querySelectorAll("input[name=prof]").forEach(r => r.onchange = async () => { try { const p = await api("/profile", { profile: r.value }); if (p.reload) toast("Reload the model (Unload, then Load) to apply this profile"); } catch (e) { toast(e.message); } refresh(); });
 $("recheck").onclick = doctor;
 
@@ -556,7 +565,7 @@ addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("chatcard")
   if (!TOKEN) { $("pill").textContent = "not signed in"; toast("Open the address printed by the launcher (its login link works once)."); return; }
   show("setup");
   try { const s = await api("/status"); for (const m of s.models) $("llmsel").append(new Option(({ qwen35s: "Qwen3.5-0.8B · fast (Assisted)", qwen35m: "Qwen3.5-2B · medium (Assisted)", qwen35l: "Qwen3.5-4B · quality, slow (Assisted)", qwen3: "Qwen3-1.7B · medium (NPU only ok)", qwen3s: "Qwen3-0.6B · fast (NPU only ok)" })[m] || m, m)); $("llmsel").value = s.models.includes("qwen35m") ? "qwen35m" : s.models.includes("qwen3") ? "qwen3" : s.models[0];
-    { const rl = await api("/rules"); $("roots").value = rl.roots.join("\n"); $("vram").value = rl.llm_vram_gb ?? 4.0; $("ctxwin").value = rl.context_tokens ?? 80000; $("compact").value = Math.round((rl.compact_at ?? 0.7) * 100); $("gshare").value = String(rl.gpu_share ?? 0); $("scache").value = rl.state_cache_gb ?? 8; } } catch (e) { toast(e.message); }
+    { const rl = await api("/rules"); $("roots").value = rl.roots.join("\n"); $("vram").value = rl.llm_vram_gb ?? 4.0; $("ctxwin").value = rl.context_tokens ?? 80000; $("compact").value = Math.round((rl.compact_at ?? 0.7) * 100); window.RULES = rl; syncShare(); $("vmargin").value = rl.vram_margin_mib ?? 700; $("scache").value = rl.state_cache_gb ?? 8; } } catch (e) { toast(e.message); }
   await loadSettings(); api("/rules").then(r => { $("savechats").checked = !!r.save_chats; if (r.project_root) { $("projroot").value = r.project_root; $("projnote").textContent = "project mode: the model sees a map of this folder (edits need your Apply)"; } }).catch(() => {}); api("/facts").then(r => { $("facts").value = r.facts.join("\n"); }).catch(() => {}); refreshChats(); doctor(); refresh(); pollDocs().catch(() => {}); setInterval(refresh, 1500);
 })();
 </script>

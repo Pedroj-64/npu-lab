@@ -157,8 +157,9 @@ try:
         if has_gpu and os.path.exists(os.path.join(ROOT, "models/qwen35_2b/config.json")):
             check("qwen3.5 refused without the assisted profile", (call("POST", "/profile", {"profile": "npu_only"}), call("POST", "/mode", {"mode": "llm", "model": "qwen35m"}))[1][0] == 409)
             call("POST", "/profile", {"profile": "assisted"})
-            check("gpu_share must be 0, 0.25 or 0.5", call("POST", "/rules", {"gpu_share": 0.3})[0] == 400)
-            call("POST", "/rules", {"context_tokens": 80000, "gpu_share": 0.5, "compact_at": 0.7})
+            check("gpu_share must be a per-model object with allowed values", all(call("POST", "/rules", {"gpu_share": g})[0] == 400 for g in (0.3, {"qwen35m": 0.3}, {"qwen35l": 0.5}, {"nope": 0.0})))
+            check("a per-model share is saved, the 4B default stays 0", call("POST", "/rules", {"gpu_share": {"qwen35m": 0.75}})[0] == 200 and json.loads(call("GET", "/rules")[1])["gpu_share_effective"] == {"qwen35s": 0.0, "qwen35m": 0.75, "qwen35l": 0.0})
+            call("POST", "/rules", {"context_tokens": 80000, "gpu_share": {"qwen35m": 0.5}, "compact_at": 0.7})
             s, _ = call("POST", "/mode", {"mode": "llm", "model": "qwen35m"})
             check("qwen3.5-2B loads with a 50% GPU share", s == 200)
             if s == 200:

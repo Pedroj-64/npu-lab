@@ -9,9 +9,16 @@ reading the document again. Only for the hybrid Qwen3.5 engine, whose state is s
 """
 import hashlib, json, os, time
 import numpy as np
-import torch
 
 MIN_TOKENS = 4096          # shorter prefixes are cheaper to read again than to cache
+
+
+def lock_down(root):
+    """The saved state is derived from what you read (documents, code): owner only. Also fixes folders and files an older version created with the default permissions."""
+    for d, subs, files in os.walk(root):
+        os.chmod(d, 0o700)
+        for f in files:
+            os.chmod(os.path.join(d, f), 0o600)
 
 
 def _h(ids):
@@ -22,7 +29,8 @@ class StateCache:
     def __init__(self, root, model_key, max_bytes=8e9):
         self.dir = os.path.join(root, model_key)
         self.max_bytes = max_bytes
-        os.makedirs(self.dir, exist_ok=True)
+        os.makedirs(self.dir, mode=0o700, exist_ok=True)
+        lock_down(root)
         self.idx_path = os.path.join(self.dir, "index.json")
 
     def _index(self):
@@ -33,7 +41,8 @@ class StateCache:
 
     def _write(self, idx):
         tmp = self.idx_path + ".tmp"
-        json.dump(idx, open(tmp, "w"))
+        with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            json.dump(idx, f)
         os.replace(tmp, self.idx_path)
 
     def save(self, ids, pos, core):
@@ -48,7 +57,9 @@ class StateCache:
         conv, rec = core.snaps[pos]
         blob = {"K": core.K[:, :, :pos].cpu(), "V": core.V[:, :, :pos].cpu(), "conv": conv, "rec": rec, "n": pos}
         path = os.path.join(self.dir, h + ".pt")
+        import torch
         torch.save(blob, path + ".tmp")
+        os.chmod(path + ".tmp", 0o600)
         os.replace(path + ".tmp", path)
         idx[h] = {"n": pos, "bytes": os.path.getsize(path), "t": time.time()}
         while sum(e["bytes"] for e in idx.values()) > self.max_bytes and len(idx) > 1:      # least recently used first
@@ -72,6 +83,7 @@ class StateCache:
                 continue
             path = os.path.join(self.dir, h + ".pt")
             try:
+                import torch
                 blob = torch.load(path, map_location="cpu")
             except (OSError, RuntimeError):
                 continue

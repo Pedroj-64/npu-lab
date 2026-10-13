@@ -21,7 +21,7 @@ def call(path, body, timeout=400):
 
 ok = False
 try:
-    call("/profile", {"profile": "assisted"}); call("/rules", {"context_tokens": 8192, "llm_vram_gb": 5.0, "gpu_share": 0.0, "compact_at": 0, "project_root": proj})
+    call("/profile", {"profile": "assisted"}); call("/rules", {"context_tokens": 8192, "llm_vram_gb": 5.0, "gpu_share": {"qwen35m": 0.0, "qwen35l": 0.0}, "compact_at": 0, "project_root": proj})
     s, b = call("/mode", {"mode": "llm", "model": MODEL})
     assert s == 200, b
     target, instr = E.TASKS[TID][0], E.TASKS[TID][1]

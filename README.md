@@ -134,6 +134,11 @@ The NPU is the center of the project; GPU/CPU are optional helpers, never requir
    python scripts/build_matvec.py --shared4 $(python src/qwen35_npu.py --model models/qwen35_2b --shapes)
    python scripts/build_prefill.py models/qwen3        # only the NPU-only Qwen3 models read prompts with NPU kernels
    ```
+   GPU share kernels: every share needs its own kernels (the build folder `build/` is not in git, so a fresh checkout has to build them). The defaults are 2B 50 %, everything else 0 %; the 2B "max speed" profile (75 %) and the 4B at 25 % are opt-in. If the kernels of a share are missing the Settings page greys that option out and shows the command, and loading the model refuses with the same command (about 80 s for the 2B at 75 %, CPU only):
+   ```
+   python scripts/build_matvec.py --shared4 $(python src/qwen35_npu.py --model models/qwen35_2b --shapes --share 0.75)
+   ```
+   Loading also refuses when it would leave less GPU memory free for the desktop than the margin in Settings (700 MiB by default; the 4B at 50 % does not fit).
 8. Optional: local documentation index (`python src/docs.py --device gpu build`, after `tldr --update`).
 
 ## Status
