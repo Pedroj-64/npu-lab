@@ -54,6 +54,30 @@ Notas: el 4B solo se midió con reparto 0 % (con la tarjeta de 5.72 GiB los peso
 - La NPU sola no se puede aislar (su aporte está dentro del APU, ~23 W incluyendo CPU). No afirmo W de la NPU.
 - No se midió: `balanced`/`power-saver`, batería, Qwen3.5-0.8B, 4B con reparto > 0 %. Una sesión (13 oct) por configuración; el reinicio con cargador es el único cambio entre tandas.
 
+## Segunda sesión sana (bloque 1, 13 oct 13:22-13:44) [medido, n = 3 corridas por fila; crudos en `bench/energy_runs.jsonl`]
+**Qwen3.5-4B con reparto de GPU, `--vram-gb 5.0`** (el 0 % viene de la primera sesión sana: 4.23 ± 0.20 tok/s, 0.11 ± 0.02 tok/J, pico 5057 MiB):
+
+| reparto | decode tok/s | total W (GPU W) | tok/J | prefill 4096 tok/s | VRAM pico (nvidia-smi) | hueco libre de 6144 MiB |
+|---|---:|---:|---:|---:|---:|---:|
+| 0 % | 4.23 ± 0.20 | 37.4 (12.0) | 0.11 ± 0.02 | 781.7 | 5057 MiB | 1087 MiB (cumple >= 1024) |
+| 25 % | **4.99 ± 0.00** (+18 %) | 46.2 (17.7) | 0.11 ± 0.00 | 780.4 | **5277 MiB** | 867 MiB (**no cumple**) |
+| 50 % | **6.76 ± 0.07** (+60 %) | 63.2 (36.9) | 0.11 ± 0.00 | 782.6 | **5755 MiB** | 389 MiB (**no cumple**; el asignador de CUDA registró un OOM recuperado al pedir 608 MiB con 548 MiB libres) |
+
+Lectura: el reparto sube la velocidad del 4B (+18 % y +60 %) pero **no mejora tokens/J** (la GPU gasta lo que ahorra) y **rompe el hueco de 1 GB para el escritorio** desde el 25 %. Por la regla escrita (pico <= 5120 MiB) el 4B se queda en 0 % con 5.0 GB; los repartos 0.40 y 0.30 del plan no se probaron porque el pico crece con el reparto (+220 MiB del 0 al 25 %, +478 más hasta el 50 %) y ya el 25 % se pasa [inferido de 3 puntos, no medido]. Decisión pendiente tuya: 25 % (+18 %, 867 MiB libres) o 0 %. El prefill no cambia con el reparto (782 tok/s), igual que en el 2B.
+
+**Qwen3-1.7B, ¿la diferencia 0.33 frente a 0.30 tok/J es ruido? No** (regla escrita antes: real si las medias de 3 procesos difieren > 2 desviaciones entre procesos y en la misma dirección en los 3 pares). Procesos alternados solo NPU / Asistido, decode, 3 corridas cada uno:
+
+| perfil | tok/s (media de 3 procesos) | total W | GPU W | tok/J por proceso |
+|---|---:|---:|---:|---|
+| solo NPU | 8.80 ± 0.02 | 31.5 ± 0.2 | 4.6 | 0.279, 0.278, 0.281 |
+| Asistido | 9.53 ± 0.08 (+8 %) | 39.2 ± 0.8 | 11.0 | 0.248, 0.246, 0.236 |
+
+Diferencia de tok/J 0.036 frente a 2 x la mayor desviación entre procesos 0.014, y NPU-only gana en los 3 pares: **real, NPU-only ~13 % más eficiente en decode**. Viene de los W (la GPU con el modelo cargado gasta 11.0 W frente a 4.6 W, +6.5 W) y no de tok/s (el Asistido es +8 % más rápido). **Pero el nivel absoluto cambia entre sesiones:** el solo-NPU pasó de 9.10 tok/s a 27.8 W (0.33) a 8.80 tok/s a 31.5 W (0.28) en 40 min (el APU subió de 23.2 a 27.0 W con el mismo estado de energía): los tok/J absolutos de sesiones distintas no se comparan; la razón NPU/Asistido dentro de una sesión (1.10 y 1.15) sí.
+
+**Qwen3.5-2B, barrido 60-75 %:** ver `bench/PROPUESTA_GPU_SANA.md` (75 % = 18.19 tok/s, +34 % sobre el 50 %, tok/J igual).
+
+**Qwen3.5-2B, control de la sesión:** reparto 50 % = 14.13 ± 0.03 tok/s, 0.33 ± 0.01 tok/J (hoy a las 13:27; 14.22 ± 0.05 y 0.35 a las 12:59: misma cifra dentro de ~1 %, W algo mayores).
+
 # Tanda anterior con la GPU degradada (P5, memoria 780 MHz, ~2.5 TFLOPS) [medido, GPU degradada]
 Conservada tal cual como referencia; NO describe el rendimiento normal de la máquina.
 
