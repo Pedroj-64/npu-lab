@@ -1,6 +1,7 @@
 """Does a repo map help a small model edit code? Five fixed edit tasks on a small project (plus --filler N unrelated modules to make it big),
 each asked twice: with ALL files pasted in full ("full") and with the repo map + only the target file ("map"). The new file is applied and
 checked by running code, so the score is "the edit works", not "the answer looks right".
+--format file (default) asks for the whole new file; --format edit asks only for SEARCH/REPLACE blocks (much less to write at 4-9 tok/s).
 usage: python bench/edit_eval.py --check                 verify the tasks themselves with the reference solutions (no model, ~1 s)
        python bench/edit_eval.py --model qwen35m|qwen35l [--filler 20] [--tasks 1,2,3,4,5] [--tokens 450] [--deadline 900]   (uses the NPU and GPU: run alone)"""
 import http.client, json, os, re, subprocess, sys, tempfile, time
@@ -46,19 +47,45 @@ def project(folder, filler):
     return files
 
 
-def ask_text(files, mode, tid, folder):
+BLOCK = re.compile(r"<<<<<<< SEARCH\n(.*?)\n?=======\n(.*?)\n?>>>>>>> REPLACE", re.S)
+
+
+def apply_edit(old, answer):
+    """Apply SEARCH/REPLACE blocks to the text of a file -> (new text, error). Every SEARCH must match exactly once."""
+    blocks = BLOCK.findall(answer)
+    if not blocks:
+        return None, "no edit block"
+    for k, (a, b) in enumerate(blocks, 1):
+        a = a.strip("\n")
+        if not a or old.count(a) != 1:
+            return None, f"block {k}: SEARCH text found {old.count(a) if a else 0} times (must be exactly once)"
+        old = old.replace(a, b.strip("\n") if b.strip() else "", 1)
+    return old if old.endswith("\n") else old + "\n", ""
+
+
+def ask_text(files, mode, tid, folder, fmt="file"):
     target, instr = TASKS[tid][0], TASKS[tid][1]
     ctx = ("Project files:\n\n" + "\n\n".join(f"### {n}\n```python\n{t}```" for n, t in files.items())) if mode == "full" else \
           ("Map of the project (signatures only):\n" + repomap.build(folder) + f"\n\nFull file you will edit:\n### {target}\n```python\n{files[target]}```")
+    if fmt == "edit":
+        return (f"{ctx}\n\nTask: in `{target}`: {instr}\nReply with ONLY the changes to `{target}` as one or more blocks in exactly this format, and nothing else:\n"
+                "<<<<<<< SEARCH\n(lines copied exactly from the current file)\n=======\n(the new lines)\n>>>>>>> REPLACE\n"
+                "To add code at the end of the file, SEARCH for its last lines and repeat them in REPLACE followed by the new code. Do not rewrite what does not change.")
     return f"{ctx}\n\nTask: in `{target}`: {instr}\nReply with the complete new content of `{target}` in one ```python block and nothing else."
 
 
-def apply_and_check(folder, tid, answer):
-    m = re.search(r"```(?:python)?\n(.*?)```", answer, re.S)
-    if not m:
-        return False, "no code block"
+def apply_and_check(folder, tid, answer, fmt="file"):
     path = os.path.join(folder, TASKS[tid][0]); old = open(path).read()
-    open(path, "w").write(m.group(1))
+    if fmt == "edit":
+        new, err = apply_edit(old, answer)
+        if new is None:
+            return False, err
+    else:
+        m = re.search(r"```(?:python)?\n(.*?)```", answer, re.S)
+        if not m:
+            return False, "no code block"
+        new = m.group(1)
+    open(path, "w").write(new)
     try:
         r = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, '.')\n" + TASKS[tid][2]], cwd=folder, capture_output=True, text=True, timeout=20)
         return r.returncode == 0, (r.stderr.strip().splitlines() or [""])[-1][:120]
@@ -74,14 +101,18 @@ def check_tasks():
         for tid in TASKS:
             before, _ = apply_and_check(d, tid, "```python\n" + files[TASKS[tid][0]] + "```")       # the untouched file must FAIL the check
             ok, why = apply_and_check(d, tid, "```python\n" + TASKS[tid][3] + "```")                 # the reference must PASS it
-            print(f"task {tid}: untouched fails={not before}  reference passes={ok} {why}")
-            assert not before and ok
+            as_edit, _ = apply_and_check(d, tid, f"<<<<<<< SEARCH\n{files[TASKS[tid][0]]}=======\n{TASKS[tid][3]}>>>>>>> REPLACE", "edit")      # the same reference through the edit-block applier
+            print(f"task {tid}: untouched fails={not before}  reference passes={ok} {why}  as edit block passes={as_edit}")
+            assert not before and ok and as_edit
+        o = "a\nb\nc\n"
+        assert apply_edit(o, "<<<<<<< SEARCH\nb\n=======\nB\nB2\n>>>>>>> REPLACE\n<<<<<<< SEARCH\nc\n=======\nC\n>>>>>>> REPLACE")[0] == "a\nB\nB2\nC\n"
+        assert apply_edit(o, "<<<<<<< SEARCH\nzz\n=======\nx\n>>>>>>> REPLACE")[0] is None and apply_edit("a\na\n", "<<<<<<< SEARCH\na\n=======\nx\n>>>>>>> REPLACE")[0] is None and apply_edit(o, "hello")[0] is None
         big = project(d, 20)
         print(f"filler 20: {sum(len(t) for t in big.values())} chars in full, map {len(repomap.build(d))} chars")
 
 
 def run():
-    model, filler, tokens, deadline = arg("--model", "qwen35m"), arg("--filler", 20), arg("--tokens", 450), arg("--deadline", 900)
+    model, filler, tokens, deadline, fmt = arg("--model", "qwen35m"), arg("--filler", 20), arg("--tokens", 450), arg("--deadline", 900), arg("--format", "file")
     tids = [int(x) for x in arg("--tasks", "1,2,3,4,5").split(",")]
     tmp = tempfile.mkdtemp(); T = "e" * 43; t0 = time.time()
     p = subprocess.Popen([sys.executable, "-u", os.path.join(ROOT, "src", "serve.py")], cwd=ROOT, stdout=subprocess.PIPE, text=True,
@@ -112,13 +143,13 @@ def run():
             for tid in tids:
                 for mode in ("full", "map"):
                     if time.time() - t0 > deadline: raise SystemExit(f"deadline of {deadline}s reached")
-                    t = time.time(); ans, st = chat(ask_text(files, mode, tid, d)); ok, why = apply_and_check(d, tid, ans); score[mode] += ok
-                    print(f"task {tid} {mode:4s}: {'PASS' if ok else 'FAIL'}  prompt {st.get('prefill_tokens', 0):5d} tokens  {time.time() - t:5.1f}s  {why}", flush=True)
+                    t = time.time(); ans, st = chat(ask_text(files, mode, tid, d, fmt)); ok, why = apply_and_check(d, tid, ans, fmt); score[mode] += ok
+                    print(f"task {tid} {mode:4s}: {'PASS' if ok else 'FAIL'}  prompt {st.get('prefill_tokens', 0):5d} tokens  wrote {st.get('decode_tokens', 0):3d} tokens  {time.time() - t:5.1f}s  {why}", flush=True)
     finally:
         try: call("/mode", {"mode": "none"}, 60)
         except Exception: pass
         p.terminate()
-    print(f"{model}, filler {filler}: full {score['full']}/{len(tids)}   map {score['map']}/{len(tids)}")
+    print(f"{model}, format {fmt}, filler {filler}: full {score['full']}/{len(tids)}   map {score['map']}/{len(tids)}")
 
 
 if __name__ == "__main__":
