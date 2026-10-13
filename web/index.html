@@ -53,7 +53,7 @@
   .chip button { background:none; border:0; color:var(--dim); cursor:pointer; font:inherit; padding:0 4px } .chip button:hover { color:var(--bad) }
   #chatcard { position:relative } #chatcard.drag::after { content:"Drop files to add them to My documents"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     background:rgba(15,17,21,.88); border:2px dashed var(--acc); border-radius:10px; color:var(--acc); font-size:16px; z-index:5 }
-  .pre { display:flex; gap:6px; flex-wrap:wrap } .pre button.on { border-color:var(--acc); color:var(--acc) }
+  .agent { white-space:pre-wrap; font-size:12.5px; margin-top:6px } .pre { display:flex; gap:6px; flex-wrap:wrap } .pre button.on { border-color:var(--acc); color:var(--acc) }
   #toast { position:fixed; bottom:16px; right:16px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 14px; display:none; max-width:420px; z-index:9; }
 </style>
 </head>
@@ -100,6 +100,7 @@
     <div class="row" style="margin-top:8px" id="projrow">
       <label title="The model sees a map of this folder and proposes edits; nothing is written until you press Apply on an answer.">project folder <input id="projroot" placeholder="empty = no project, e.g. ~/code/app" style="width:280px"></label>
       <button class="b" id="setproj">Set</button><button class="b" id="clearproj">Clear</button><span class="dim" id="projnote"></span>
+      <label title="The model proposes one action at a time (read, list, edit, create, delete). Reads run alone; anything that writes waits for your OK. Needs a project folder."><input type="checkbox" id="agentmode"> agent mode</label>
     </div>
     <div class="row" style="margin-top:8px" id="chatsrow">
       <label title="Off by default. Chats are stored as files on this PC only."><input type="checkbox" id="savechats"> save chats on this PC</label>
@@ -335,6 +336,24 @@ function addApply(box, text) {    // an answer with SEARCH/REPLACE blocks: show 
   } catch (e) { toast(e.message); } };
   box.append(b);
 }
+const AG = { steps: 0, max: 12, ok: true };      // agent loop: the model proposes one action per reply; reads run alone, writes wait for a click
+async function agentStep(box, text) {
+  const say = (t, cls = "src") => { const d = mk("div", cls, t); box.append(d); $("log").scrollTop = 1e9; return d; };
+  try {
+    let r = await api("/agent/run", { text, last_ok: AG.ok });
+    if (r.needs_confirm) {
+      const d = say(r.shown, "agent"), ask = mk("div", "row"), yes = mk("button", "b pri", "Do it"), no = mk("button", "b", "Stop the agent"); ask.append(yes, no); box.append(ask);
+      const go = await new Promise(res => { yes.onclick = () => res(true); no.onclick = () => res(false); });
+      ask.remove(); if (!go) { say("Agent stopped; nothing was changed."); return; }
+      r = await api("/agent/run", { text, confirm: true, last_ok: AG.ok }); d.remove();
+    }
+    AG.ok = r.ok; say((r.ok ? "" : "Error: ") + r.shown, "agent");
+    if (r.done) { say("Agent finished."); return; }
+    if (!$("agentmode").checked) return;
+    if (++AG.steps >= AG.max) { say(`Agent paused after ${AG.max} steps. Send a message to continue.`); return; }
+    send({ prompt: (r.ok ? "Result: " : "Error: ") + r.shown + "\nNext action?", auto: true });
+  } catch (e) { toast(e.message); }
+}
 const newChatId = () => (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : Math.random().toString(36).slice(2) + Date.now().toString(36)).slice(0, 24);
 $("newchat").onclick = () => { HISTORY = []; CHAT_ID = CHAT_TITLE = ""; $("log").textContent = ""; $("stats").textContent = ""; };
 async function refreshChats() {
@@ -376,7 +395,8 @@ async function send(o = {}) {   // o: {prompt, docs, web, cloud} re-asks the sam
   if (abort) return;      // another click got in while we waited
   let release; TIDY = new Promise(r => release = r);
   const cloud = o.cloud ?? $("backend").value === "cloud";
-  if (o.prompt && HISTORY.length >= 2 && HISTORY[HISTORY.length - 2].content === prompt) HISTORY.splice(-2);
+  if (!o.auto) { AG.steps = 0; AG.ok = true; }
+  if (o.prompt && !o.auto && HISTORY.length >= 2 && HISTORY[HISTORY.length - 2].content === prompt) HISTORY.splice(-2);
   if (!cloud && (!ST || ST.mode !== "llm")) { toast("Load a model first (or choose Cloud)"); release(); return; }
   if (!o.prompt) $("prompt").value = ""; const me = mk("div", "msg me", prompt); $("log").append(me);
   const box = mk("div", "msg bot"), srcs = mk("div", "src"), phase = mk("div", "phase"), body = mk("div");
@@ -384,18 +404,20 @@ async function send(o = {}) {   // o: {prompt, docs, web, cloud} re-asks the sam
   const msg = { text: "", think: "", body, done: false };
   const setPhase = t => { phase.textContent = ""; if (t) { phase.append(mk("span", "", t), mk("span", "dots")); } };
   setPhase("Thinking"); $("send").disabled = true; $("stop").disabled = false; abort = new AbortController();
-  let finished = false;
+  let finished = false, complete = false; const agentOn = $("agentmode").checked && !cloud;
   const finish = () => {            // the answer is complete (or stopped): the user can already write the next question
     if (finished) return; finished = true;
     msg.done = true; setPhase(""); renderMsg(msg);
     if (msg.text) HISTORY.push({ role: "user", content: prompt }, { role: "assistant", content: msg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim() });
     abort = null; $("send").disabled = false; $("stop").disabled = true; refresh(); saveChat();
-    if (msg.text.includes("<<<<<<< SEARCH")) addApply(box, msg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, ""));
+    const clean = msg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim();
+    if (agentOn && complete && clean) agentStep(box, clean);
+    else if (msg.text.includes("<<<<<<< SEARCH")) addApply(box, msg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, ""));
   };
   let raf = 0; const draw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderMsg(msg); $("log").scrollTop = 1e9; }); };
   try {
     const r = await fetch("/chat", { method: "POST", signal: abort.signal, headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, tokens: 600, history: HISTORY, backend: cloud ? "cloud" : "local", docs: o.docs ?? $("usedocs").value, mine: o.mine ?? $("usemine").value, web: o.web ?? $("useweb").value, cloud_context: $("cloudctx").checked }) });
+      body: JSON.stringify({ prompt, tokens: 600, history: HISTORY, backend: cloud ? "cloud" : "local", docs: o.docs ?? $("usedocs").value, mine: o.mine ?? $("usemine").value, web: o.web ?? $("useweb").value, cloud_context: $("cloudctx").checked, agent: agentOn }) });
     if (!r.ok) throw new Error((await r.json()).error || r.statusText);
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) { const { done, value } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });
@@ -414,7 +436,7 @@ async function send(o = {}) {   // o: {prompt, docs, web, cloud} re-asks the sam
         if (m.think) { msg.think += m.think; setPhase("Thinking"); draw(); }
         if (m.token) { if (!msg.text) setPhase(""); msg.text += m.token; draw(); }
         if (m.error) toast(m.error);
-        if (m.done === true) { finish(); const s = m.stats || {}; $("stats").textContent = s.backend === "cloud" ? `cloud · ${s.seconds}s` : `${(s.decode_tokens / Math.max(s.decode_s, 1e-9)).toFixed(1)} tok/s · prompt ${s.prefill_tokens} tokens (${s.reused_tokens || 0} reused) read in ${s.prefill_s.toFixed(1)} s`; } } }
+        if (m.done === true) { complete = true; finish(); const s = m.stats || {}; $("stats").textContent = s.backend === "cloud" ? `cloud · ${s.seconds}s` : `${(s.decode_tokens / Math.max(s.decode_s, 1e-9)).toFixed(1)} tok/s · prompt ${s.prefill_tokens} tokens (${s.reused_tokens || 0} reused) read in ${s.prefill_s.toFixed(1)} s`; } } }
   } catch (e) { if (e.name !== "AbortError") toast(e.message); }
   finish(); setPhase(""); release();
 }
