@@ -25,3 +25,11 @@ Criterios: (1) logits idénticos en 5 pasos fijos: **sí** en los dos modelos; (
 - **Costes fijos de la NPU: 10.4 ms (8 %) en el 2B y 20.3 ms (7 %) en el 4B.** Es la parte accionable sin GPU: lote C.
 - El pegamento de CPU es 1 %; no merece trabajo.
 - No hay solapamiento posible dentro de un token (cada capa depende de la anterior): la GPU espera a la NPU y al revés.
+
+## Lote B. `NPU_FAST_VOCAB` en Qwen3.5 (bandera apagada por defecto)
+**Qué cambia (tras bandera `NPU_FAST_VOCAB=1` o `fast_head=True`, solo con reparto de GPU 0 %):** la cabeza de salida de la NPU se calcula sobre 38 912 de los 248 320 tokens (4 trozos de 9 728 filas, ya compilados) en lugar de todo el vocabulario: ~429 MB menos por token en el 2B (la cabeza pesa 509 MB de 1885 MB). El subconjunto se elige con la misma función que el motor denso (`fast_vocab`: frecuencia en el índice de documentos y en las traducciones del sistema, todos los símbolos y los 256 bytes) pero con **caché propia por tokenizador**, porque Qwen3 y Qwen3.5 solo comparten 281 ids de token [medido] y la caché antigua se valida solo por longitud (con 38 912 entradas una caché de Qwen3 pasaría por válida para Qwen3.5: error silencioso). Sin bandera, el código es el de antes.
+**Criterio de éxito (fijado antes de medir):** se recomienda pasar a "opcional visible" si se cumplen TODOS:
+1. **Velocidad** [medido, GPU degradada], Qwen3.5-2B, bandera encendida frente a apagada en procesos alternados, 3 + 3, 48 tokens, contexto corto: la media de tok/s mejora **>= 10 %** y la mejora supera 2 desviaciones de la diferencia (los intervalos no se solapan). Estimación previa: 429 MB / 21.9 GB/s = 19.6 ms de 136 ms = +16 %.
+2. **Calidad:** en 10 prompts fijos (los 5 de `bench/token_equiv.py` más 5 de español, código y charla), decodificación voraz de 80 tokens: (a) la fracción de tokens de la salida con cabeza completa que NO están en el subconjunto (los que la cabeza reducida no puede escribir) **<= 0.5 %**; (b) texto idéntico a la cabeza completa en **>= 8 de 10** prompts; en los demás se cuantifica el índice del primer token distinto y la coincidencia por token.
+3. Sin la bandera, la salida y el rendimiento son los de antes (los tests offline pasan y, en el modo apagado, los mismos logits en 5 pasos fijos).
+Si se cumple 1 pero falla 2: "opcional con aviso" (qué se pierde); si falla 1: no se recomienda.
