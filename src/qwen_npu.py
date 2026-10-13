@@ -556,10 +556,10 @@ class Qwen:
         """Short generation under its own system prompt (used to summarise old conversation turns)."""
         return "".join(self.stream(prompt, n, system=system))
 
-    def classify(self, prompt, system, labels):
-        """Pick the best of `labels` for `prompt`: read the prompt once and compare the next-token scores of the labels'
-        first tokens (so the answer is always one of them; no free text to parse)."""
-        text = (f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\nQuestion: {prompt[:600]}\n"
+    def option_probs(self, prompt, system, labels, limit=600):
+        """Probability of each of `labels` as the next word: read the prompt once and take the softmax of the next-token scores of the labels'
+        first tokens (so the answer is always one of them; nothing is sampled and no free text has to be parsed)."""
+        text = (f"<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\nQuestion: {prompt[:limit]}\n"
                 f"Reply with one word: {', '.join(labels)}.<|im_end|>\n<|im_start|>assistant\n" + ("<think>\n\n</think>\n\n" if self.qwen3 else ""))
         ids = self.tok.encode(text, add_special_tokens=False).ids
         self.cache_ids = []                                # this overwrites the cache
@@ -569,9 +569,17 @@ class Qwen:
             for pos, t in enumerate(ids):
                 logits = self.step(t, pos)
         first = [self.tok.encode(l, add_special_tokens=False).ids[0] for l in labels]
+        assert len(set(first)) == len(first), f"labels share their first token: {labels}"
         if self.vpos is not None:
-            return labels[int(np.argmax([logits[self.vpos[t]] if self.vpos[t] >= 0 else -1e30 for t in first]))]
-        return labels[int(np.argmax([logits[t] for t in first]))]
+            z = np.array([logits[self.vpos[t]] if self.vpos[t] >= 0 else -1e30 for t in first], np.float64)
+        else:
+            z = np.array([logits[t] for t in first], np.float64)
+        z = np.exp(z - z.max())
+        return z / z.sum()
+
+    def classify(self, prompt, system, labels):
+        """The most probable of `labels` (see option_probs)."""
+        return labels[int(np.argmax(self.option_probs(prompt, system, labels)))]
 
     def generate(self, prompt, n):
         text = "".join(self.stream(prompt, n))

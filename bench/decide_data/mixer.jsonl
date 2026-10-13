@@ -1,0 +1,201 @@
+{"id": "mixer-0", "task": "mixer", "split": "train", "lang": "es", "state": "hola, cómo estás", "label": "fast"}
+{"id": "mixer-1", "task": "mixer", "split": "train", "lang": "en", "state": "what is the capital of Japan", "label": "fast"}
+{"id": "mixer-2", "task": "mixer", "split": "test", "lang": "en", "state": "translate 'thank you very much' to French", "label": "fast"}
+{"id": "mixer-3", "task": "mixer", "split": "val", "lang": "es", "state": "cuánto es 17 por 23", "label": "fast"}
+{"id": "mixer-4", "task": "mixer", "split": "train", "lang": "en", "state": "tell me a joke", "label": "fast"}
+{"id": "mixer-5", "task": "mixer", "split": "test", "lang": "en", "state": "who wrote Hamlet", "label": "fast"}
+{"id": "mixer-6", "task": "mixer", "split": "val", "lang": "es", "state": "qué hora es en Tokio si aquí son las 3", "label": "fast"}
+{"id": "mixer-7", "task": "mixer", "split": "val", "lang": "en", "state": "spell 'necessary'", "label": "fast"}
+{"id": "mixer-8", "task": "mixer", "split": "val", "lang": "en", "state": "give me a synonym for happy", "label": "fast"}
+{"id": "mixer-9", "task": "mixer", "split": "train", "lang": "es", "state": "cómo se dice 'mesa' en inglés", "label": "fast"}
+{"id": "mixer-10", "task": "mixer", "split": "test", "lang": "en", "state": "what year did World War II end", "label": "fast"}
+{"id": "mixer-11", "task": "mixer", "split": "val", "lang": "es", "state": "dame una palabra que rime con luz", "label": "fast"}
+{"id": "mixer-12", "task": "mixer", "split": "train", "lang": "en", "state": "is a tomato a fruit", "label": "fast"}
+{"id": "mixer-13", "task": "mixer", "split": "test", "lang": "es", "state": "convierte 10 millas a kilómetros", "label": "fast"}
+{"id": "mixer-14", "task": "mixer", "split": "test", "lang": "en", "state": "good morning!", "label": "fast"}
+{"id": "mixer-15", "task": "mixer", "split": "test", "lang": "en", "state": "what does CPU stand for", "label": "fast"}
+{"id": "mixer-16", "task": "mixer", "split": "train", "lang": "es", "state": "dime un dato curioso", "label": "fast"}
+{"id": "mixer-17", "task": "mixer", "split": "train", "lang": "en", "state": "name three colors", "label": "fast"}
+{"id": "mixer-18", "task": "mixer", "split": "train", "lang": "es", "state": "cuál es el plural de lápiz", "label": "fast"}
+{"id": "mixer-19", "task": "mixer", "split": "test", "lang": "en", "state": "how many days are in March", "label": "fast"}
+{"id": "mixer-20", "task": "mixer", "split": "val", "lang": "es", "state": "gracias", "label": "fast"}
+{"id": "mixer-21", "task": "mixer", "split": "train", "lang": "en", "state": "what is 2 to the power of 10", "label": "fast"}
+{"id": "mixer-22", "task": "mixer", "split": "test", "lang": "es", "state": "cuál es la capital de Perú", "label": "fast"}
+{"id": "mixer-23", "task": "mixer", "split": "train", "lang": "en", "state": "define serendipity in one line", "label": "fast"}
+{"id": "mixer-24", "task": "mixer", "split": "train", "lang": "es", "state": "traduce 'where is the bathroom' al español", "label": "fast"}
+{"id": "mixer-25", "task": "mixer", "split": "test", "lang": "en", "state": "who painted the Mona Lisa", "label": "fast"}
+{"id": "mixer-26", "task": "mixer", "split": "test", "lang": "es", "state": "qué significa HTTP", "label": "fast"}
+{"id": "mixer-27", "task": "mixer", "split": "train", "lang": "en", "state": "what is the opposite of cold", "label": "fast"}
+{"id": "mixer-28", "task": "mixer", "split": "train", "lang": "es", "state": "dime el nombre de un río de Europa", "label": "fast"}
+{"id": "mixer-29", "task": "mixer", "split": "train", "lang": "en", "state": "how do you say 'goodbye' in German", "label": "fast"}
+{"id": "mixer-30", "task": "mixer", "split": "test", "lang": "es", "state": "cuántos metros tiene un kilómetro", "label": "fast"}
+{"id": "mixer-31", "task": "mixer", "split": "train", "lang": "en", "state": "what is the largest planet", "label": "fast"}
+{"id": "mixer-32", "task": "mixer", "split": "train", "lang": "es", "state": "recomiéndame un nombre para mi gato", "label": "fast"}
+{"id": "mixer-33", "task": "mixer", "split": "train", "lang": "en", "state": "is Python interpreted or compiled, one word", "label": "fast"}
+{"id": "mixer-34", "task": "mixer", "split": "train", "lang": "es", "state": "qué día de la semana fue el 1 de enero de 2000", "label": "fast"}
+{"id": "mixer-35", "task": "mixer", "split": "test", "lang": "en", "state": "name a programming language that starts with R", "label": "fast"}
+{"id": "mixer-36", "task": "mixer", "split": "train", "lang": "es", "state": "buenas noches", "label": "fast"}
+{"id": "mixer-37", "task": "mixer", "split": "test", "lang": "en", "state": "what is H2O", "label": "fast"}
+{"id": "mixer-38", "task": "mixer", "split": "train", "lang": "es", "state": "cuántas letras tiene el abecedario", "label": "fast"}
+{"id": "mixer-39", "task": "mixer", "split": "train", "lang": "en", "state": "who discovered penicillin", "label": "fast"}
+{"id": "mixer-40", "task": "mixer", "split": "train", "lang": "es", "state": "dame un emoji de felicidad", "label": "fast"}
+{"id": "mixer-41", "task": "mixer", "split": "train", "lang": "en", "state": "what's the plural of mouse", "label": "fast"}
+{"id": "mixer-42", "task": "mixer", "split": "test", "lang": "es", "state": "resume en una frase: el gato duerme en el sofá todo el día", "label": "fast"}
+{"id": "mixer-43", "task": "mixer", "split": "train", "lang": "en", "state": "what language do they speak in Brazil", "label": "fast"}
+{"id": "mixer-44", "task": "mixer", "split": "train", "lang": "es", "state": "cuánto es el 15% de 200", "label": "fast"}
+{"id": "mixer-45", "task": "mixer", "split": "train", "lang": "en", "state": "capital of Australia?", "label": "fast"}
+{"id": "mixer-46", "task": "mixer", "split": "train", "lang": "en", "state": "define 'latency' briefly", "label": "fast"}
+{"id": "mixer-47", "task": "mixer", "split": "val", "lang": "en", "state": "di hola en tres idiomas", "label": "fast"}
+{"id": "mixer-48", "task": "mixer", "split": "val", "lang": "en", "state": "what is the chemical symbol of gold", "label": "fast"}
+{"id": "mixer-49", "task": "mixer", "split": "val", "lang": "es", "state": "convert 100 Fahrenheit to Celsius", "label": "fast"}
+{"id": "mixer-50", "task": "mixer", "split": "val", "lang": "es", "state": "cuál es el color del cielo", "label": "fast"}
+{"id": "mixer-51", "task": "mixer", "split": "val", "lang": "en", "state": "who invented the telephone", "label": "fast"}
+{"id": "mixer-52", "task": "mixer", "split": "train", "lang": "en", "state": "tell me the time zone of Madrid", "label": "fast"}
+{"id": "mixer-53", "task": "mixer", "split": "test", "lang": "es", "state": "una palabra en inglés para 'rápido'", "label": "fast"}
+{"id": "mixer-54", "task": "mixer", "split": "train", "lang": "en", "state": "what does RAM mean", "label": "fast"}
+{"id": "mixer-55", "task": "mixer", "split": "train", "lang": "es", "state": "quién escribió Cien años de soledad", "label": "fast"}
+{"id": "mixer-56", "task": "mixer", "split": "train", "lang": "en", "state": "give me a one-line motivational quote", "label": "fast"}
+{"id": "mixer-57", "task": "mixer", "split": "val", "lang": "en", "state": "how many continents are there", "label": "fast"}
+{"id": "mixer-58", "task": "mixer", "split": "train", "lang": "es", "state": "cuántos segundos tiene una hora", "label": "fast"}
+{"id": "mixer-59", "task": "mixer", "split": "train", "lang": "en", "state": "name the days of the week in Spanish", "label": "fast"}
+{"id": "mixer-60", "task": "mixer", "split": "train", "lang": "en", "state": "what is the capital of Chile", "label": "fast"}
+{"id": "mixer-61", "task": "mixer", "split": "train", "lang": "es", "state": "cuántas patas tiene una araña", "label": "fast"}
+{"id": "mixer-62", "task": "mixer", "split": "train", "lang": "en", "state": "say hello in Italian", "label": "fast"}
+{"id": "mixer-63", "task": "mixer", "split": "train", "lang": "es", "state": "qué es un byte", "label": "fast"}
+{"id": "mixer-64", "task": "mixer", "split": "train", "lang": "en", "state": "is 91 a prime number", "label": "fast"}
+{"id": "mixer-65", "task": "mixer", "split": "train", "lang": "en", "state": "what is the abbreviation of kilogram", "label": "fast"}
+{"id": "mixer-66", "task": "mixer", "split": "train", "lang": "es", "state": "saluda a mi amigo Pedro", "label": "fast"}
+{"id": "mixer-67", "task": "mixer", "split": "train", "lang": "en", "state": "what is the speed of light, roughly", "label": "fast"}
+{"id": "mixer-68", "task": "mixer", "split": "val", "lang": "es", "state": "cuál es el símbolo del euro", "label": "fast"}
+{"id": "mixer-69", "task": "mixer", "split": "train", "lang": "en", "state": "simple word for 'utilize'", "label": "fast"}
+{"id": "mixer-70", "task": "mixer", "split": "val", "lang": "en", "state": "answer yes or no: is the sun a star", "label": "fast"}
+{"id": "mixer-71", "task": "mixer", "split": "train", "lang": "es", "state": "traduce 'I am hungry' al español", "label": "fast"}
+{"id": "mixer-72", "task": "mixer", "split": "val", "lang": "en", "state": "who was the first person on the moon", "label": "fast"}
+{"id": "mixer-73", "task": "mixer", "split": "train", "lang": "es", "state": "cuántos lados tiene un hexágono", "label": "fast"}
+{"id": "mixer-74", "task": "mixer", "split": "train", "lang": "en", "state": "explain how a hash table handles collisions", "label": "medium"}
+{"id": "mixer-75", "task": "mixer", "split": "test", "lang": "es", "state": "escribe una función en python que cuente palabras en un texto", "label": "medium"}
+{"id": "mixer-76", "task": "mixer", "split": "val", "lang": "en", "state": "what is the difference between TCP and UDP and when do I use each", "label": "medium"}
+{"id": "mixer-77", "task": "mixer", "split": "test", "lang": "es", "state": "resume este párrafo y dime las ideas principales", "label": "medium"}
+{"id": "mixer-78", "task": "mixer", "split": "val", "lang": "en", "state": "write a bash script that backs up my home folder to an external disk", "label": "medium"}
+{"id": "mixer-79", "task": "mixer", "split": "train", "lang": "es", "state": "explícame cómo funciona git rebase con un ejemplo", "label": "medium"}
+{"id": "mixer-80", "task": "mixer", "split": "train", "lang": "en", "state": "what are the pros and cons of microservices", "label": "medium"}
+{"id": "mixer-81", "task": "mixer", "split": "train", "lang": "es", "state": "dame un plan de estudio de 4 semanas para aprender SQL", "label": "medium"}
+{"id": "mixer-82", "task": "mixer", "split": "val", "lang": "en", "state": "write a python class for a bank account with deposit and withdraw", "label": "medium"}
+{"id": "mixer-83", "task": "mixer", "split": "train", "lang": "en", "state": "explain what this error means: KeyError in a dictionary lookup", "label": "medium"}
+{"id": "mixer-84", "task": "mixer", "split": "test", "lang": "es", "state": "cómo configuro un servicio de systemd para que arranque mi script", "label": "medium"}
+{"id": "mixer-85", "task": "mixer", "split": "train", "lang": "en", "state": "compare REST and GraphQL", "label": "medium"}
+{"id": "mixer-86", "task": "mixer", "split": "train", "lang": "en", "state": "write unit tests for a function that parses dates", "label": "medium"}
+{"id": "mixer-87", "task": "mixer", "split": "test", "lang": "es", "state": "qué diferencia hay entre una lista y una tupla en Python y cuándo uso cada una", "label": "medium"}
+{"id": "mixer-88", "task": "mixer", "split": "val", "lang": "en", "state": "how do I read a CSV file with pandas and compute the mean per group", "label": "medium"}
+{"id": "mixer-89", "task": "mixer", "split": "train", "lang": "es", "state": "explícame el algoritmo de Dijkstra paso a paso", "label": "medium"}
+{"id": "mixer-90", "task": "mixer", "split": "train", "lang": "en", "state": "write a regex to validate a spanish phone number and explain it", "label": "medium"}
+{"id": "mixer-91", "task": "mixer", "split": "train", "lang": "en", "state": "what are good practices for naming variables", "label": "medium"}
+{"id": "mixer-92", "task": "mixer", "split": "train", "lang": "es", "state": "dame un script de fish que renombre archivos .jpeg a .jpg", "label": "medium"}
+{"id": "mixer-93", "task": "mixer", "split": "test", "lang": "en", "state": "explain how async await works in JavaScript", "label": "medium"}
+{"id": "mixer-94", "task": "mixer", "split": "val", "lang": "es", "state": "escribe una consulta SQL con join entre pedidos y clientes", "label": "medium"}
+{"id": "mixer-95", "task": "mixer", "split": "train", "lang": "en", "state": "how does garbage collection work in Java", "label": "medium"}
+{"id": "mixer-96", "task": "mixer", "split": "train", "lang": "es", "state": "responde con base en el documento: qué dice la sección 3 sobre plazos", "label": "medium"}
+{"id": "mixer-97", "task": "mixer", "split": "val", "lang": "en", "state": "write a function that merges two sorted lists", "label": "medium"}
+{"id": "mixer-98", "task": "mixer", "split": "test", "lang": "en", "state": "explain the difference between processes and threads with an example in Python", "label": "medium"}
+{"id": "mixer-99", "task": "mixer", "split": "train", "lang": "es", "state": "cómo hago un respaldo incremental con rsync", "label": "medium"}
+{"id": "mixer-100", "task": "mixer", "split": "train", "lang": "en", "state": "write a README for a small python tool", "label": "medium"}
+{"id": "mixer-101", "task": "mixer", "split": "test", "lang": "en", "state": "what is a race condition and how do I avoid it", "label": "medium"}
+{"id": "mixer-102", "task": "mixer", "split": "train", "lang": "es", "state": "traduce este párrafo técnico al inglés y mantén los términos", "label": "medium"}
+{"id": "mixer-103", "task": "mixer", "split": "train", "lang": "en", "state": "describe how HTTPS establishes a secure connection", "label": "medium"}
+{"id": "mixer-104", "task": "mixer", "split": "test", "lang": "es", "state": "escribe un decorador en python que mida el tiempo de una función", "label": "medium"}
+{"id": "mixer-105", "task": "mixer", "split": "val", "lang": "en", "state": "summarize the main arguments of this article", "label": "medium"}
+{"id": "mixer-106", "task": "mixer", "split": "val", "lang": "es", "state": "cómo puedo optimizar una consulta SQL lenta", "label": "medium"}
+{"id": "mixer-107", "task": "mixer", "split": "val", "lang": "en", "state": "explain how to set up a python virtual environment and why", "label": "medium"}
+{"id": "mixer-108", "task": "mixer", "split": "train", "lang": "es", "state": "crea un docker-compose para una app flask y postgres", "label": "medium"}
+{"id": "mixer-109", "task": "mixer", "split": "train", "lang": "en", "state": "what is the difference between a mutex and a semaphore", "label": "medium"}
+{"id": "mixer-110", "task": "mixer", "split": "train", "lang": "es", "state": "dame ideas de arquitectura para una app de notas offline", "label": "medium"}
+{"id": "mixer-111", "task": "mixer", "split": "train", "lang": "en", "state": "write a function to check if a string is a palindrome ignoring punctuation", "label": "medium"}
+{"id": "mixer-112", "task": "mixer", "split": "train", "lang": "es", "state": "explícame cómo funciona el cifrado AES a grandes rasgos", "label": "medium"}
+{"id": "mixer-113", "task": "mixer", "split": "train", "lang": "en", "state": "review this short function and suggest improvements", "label": "medium"}
+{"id": "mixer-114", "task": "mixer", "split": "train", "lang": "es", "state": "cómo hago paginación en una API REST", "label": "medium"}
+{"id": "mixer-115", "task": "mixer", "split": "val", "lang": "en", "state": "write a python script that downloads a file and shows a progress bar", "label": "medium"}
+{"id": "mixer-116", "task": "mixer", "split": "test", "lang": "en", "state": "explain the observer pattern with a small example", "label": "medium"}
+{"id": "mixer-117", "task": "mixer", "split": "train", "lang": "es", "state": "qué hace este comando de awk y cómo lo mejoro", "label": "medium"}
+{"id": "mixer-118", "task": "mixer", "split": "train", "lang": "en", "state": "outline a blog post about local LLMs on NPUs", "label": "medium"}
+{"id": "mixer-119", "task": "mixer", "split": "train", "lang": "en", "state": "write a binary search in C and explain the loop invariant", "label": "medium"}
+{"id": "mixer-120", "task": "mixer", "split": "val", "lang": "es", "state": "dame una lista de pasos para depurar un memory leak", "label": "medium"}
+{"id": "mixer-121", "task": "mixer", "split": "train", "lang": "en", "state": "compare two sorting algorithms for nearly sorted data", "label": "medium"}
+{"id": "mixer-122", "task": "mixer", "split": "train", "lang": "es", "state": "escribe un test de integración para un endpoint de login", "label": "medium"}
+{"id": "mixer-123", "task": "mixer", "split": "train", "lang": "en", "state": "how do I structure a small flask project", "label": "medium"}
+{"id": "mixer-124", "task": "mixer", "split": "train", "lang": "es", "state": "explica qué es un índice en una base de datos y cuándo perjudica", "label": "medium"}
+{"id": "mixer-125", "task": "mixer", "split": "train", "lang": "en", "state": "write a git commit message from this diff summary", "label": "medium"}
+{"id": "mixer-126", "task": "mixer", "split": "test", "lang": "es", "state": "convierte este json a una tabla markdown", "label": "medium"}
+{"id": "mixer-127", "task": "mixer", "split": "train", "lang": "en", "state": "explain Big-O of nested loops over two lists", "label": "medium"}
+{"id": "mixer-128", "task": "mixer", "split": "test", "lang": "es", "state": "cómo hago que mi script de bash maneje errores correctamente", "label": "medium"}
+{"id": "mixer-129", "task": "mixer", "split": "val", "lang": "en", "state": "write a function that flattens a nested list", "label": "medium"}
+{"id": "mixer-130", "task": "mixer", "split": "train", "lang": "en", "state": "describe the differences between Qwen and Llama architectures at a high level", "label": "medium"}
+{"id": "mixer-131", "task": "mixer", "split": "train", "lang": "es", "state": "responde usando las notas: qué decidimos sobre el formato del informe", "label": "medium"}
+{"id": "mixer-132", "task": "mixer", "split": "val", "lang": "en", "state": "give me a checklist for a code review", "label": "medium"}
+{"id": "mixer-133", "task": "mixer", "split": "test", "lang": "es", "state": "cómo implemento caché con TTL en Python", "label": "medium"}
+{"id": "mixer-134", "task": "mixer", "split": "test", "lang": "en", "state": "explain what CORS is and how to fix a CORS error", "label": "medium"}
+{"id": "mixer-135", "task": "mixer", "split": "train", "lang": "en", "state": "write a short script to rename files by date", "label": "medium"}
+{"id": "mixer-136", "task": "mixer", "split": "train", "lang": "es", "state": "qué es la inyección de dependencias y cómo se prueba", "label": "medium"}
+{"id": "mixer-137", "task": "mixer", "split": "train", "lang": "en", "state": "help me write a cover letter for a junior developer job", "label": "medium"}
+{"id": "mixer-138", "task": "mixer", "split": "train", "lang": "es", "state": "explica paso a paso cómo resolver una ecuación cuadrática y programa la solución", "label": "medium"}
+{"id": "mixer-139", "task": "mixer", "split": "train", "lang": "en", "state": "refactor the project so that all database access goes through one module and update every caller", "label": "slow"}
+{"id": "mixer-140", "task": "mixer", "split": "train", "lang": "es", "state": "implementa un sistema de autenticación completo con registro, login, tokens y pruebas en todo el proyecto", "label": "slow"}
+{"id": "mixer-141", "task": "mixer", "split": "val", "lang": "en", "state": "migrate this codebase from unittest to pytest across all test files and fix the failures", "label": "slow"}
+{"id": "mixer-142", "task": "mixer", "split": "val", "lang": "es", "state": "rediseña la arquitectura de este módulo para separar la lógica de la interfaz y actualiza todos los archivos afectados", "label": "slow"}
+{"id": "mixer-143", "task": "mixer", "split": "test", "lang": "en", "state": "write a complete command line tool with subcommands, config file, logging and tests", "label": "slow"}
+{"id": "mixer-144", "task": "mixer", "split": "train", "lang": "es", "state": "encuentra y corrige el bug que hace que el total del pedido sea incorrecto en varios archivos, y añade pruebas de regresión", "label": "slow"}
+{"id": "mixer-145", "task": "mixer", "split": "val", "lang": "en", "state": "add pagination, filtering and sorting to every list endpoint of the api and update the docs and tests", "label": "slow"}
+{"id": "mixer-146", "task": "mixer", "split": "train", "lang": "es", "state": "convierte todo el proyecto a async y asegúrate de que las pruebas siguen pasando", "label": "slow"}
+{"id": "mixer-147", "task": "mixer", "split": "train", "lang": "en", "state": "analyze this stack trace across the three modules involved and propose a fix with the minimal diff", "label": "slow"}
+{"id": "mixer-148", "task": "mixer", "split": "val", "lang": "es", "state": "implementa un parser para este formato de archivo con manejo de errores, casos límite y una batería de pruebas", "label": "slow"}
+{"id": "mixer-149", "task": "mixer", "split": "train", "lang": "en", "state": "design and implement a plugin system for this application, including loading, versioning and an example plugin", "label": "slow"}
+{"id": "mixer-150", "task": "mixer", "split": "test", "lang": "es", "state": "optimiza el rendimiento del programa: perfílalo, identifica los cuellos de botella y reescribe las partes críticas", "label": "slow"}
+{"id": "mixer-151", "task": "mixer", "split": "train", "lang": "en", "state": "rename this class everywhere in the repository, update imports, docs and tests, and check nothing else breaks", "label": "slow"}
+{"id": "mixer-152", "task": "mixer", "split": "train", "lang": "es", "state": "escribe un servidor web completo con rutas, base de datos y validación a partir de esta especificación", "label": "slow"}
+{"id": "mixer-153", "task": "mixer", "split": "train", "lang": "en", "state": "reason step by step through the concurrency bug in this queue implementation and fix it", "label": "slow"}
+{"id": "mixer-154", "task": "mixer", "split": "val", "lang": "es", "state": "añade soporte multiidioma a toda la aplicación extrayendo todas las cadenas y creando los archivos de traducción", "label": "slow"}
+{"id": "mixer-155", "task": "mixer", "split": "train", "lang": "en", "state": "implement an LRU cache with thread safety, write property based tests and benchmark it", "label": "slow"}
+{"id": "mixer-156", "task": "mixer", "split": "val", "lang": "es", "state": "diseña un esquema de base de datos para esta aplicación, escribe las migraciones y adapta los modelos", "label": "slow"}
+{"id": "mixer-157", "task": "mixer", "split": "train", "lang": "en", "state": "split this 800-line file into cohesive modules without changing behaviour and keep the tests green", "label": "slow"}
+{"id": "mixer-158", "task": "mixer", "split": "train", "lang": "es", "state": "prueba que este algoritmo es correcto y analiza su complejidad en el peor caso con una demostración detallada", "label": "slow"}
+{"id": "mixer-159", "task": "mixer", "split": "test", "lang": "en", "state": "port this script from Python 2 to Python 3 across the whole project and fix every incompatibility", "label": "slow"}
+{"id": "mixer-160", "task": "mixer", "split": "train", "lang": "es", "state": "crea un sistema de caché distribuido sencillo con invalidación y escribe la documentación técnica", "label": "slow"}
+{"id": "mixer-161", "task": "mixer", "split": "val", "lang": "en", "state": "plan and carry out a multi-step data migration with rollback, validation and a report", "label": "slow"}
+{"id": "mixer-162", "task": "mixer", "split": "test", "lang": "es", "state": "revisa todo el repositorio en busca de vulnerabilidades de inyección y corrige cada hallazgo con pruebas", "label": "slow"}
+{"id": "mixer-163", "task": "mixer", "split": "train", "lang": "en", "state": "build a small interpreter for an arithmetic language with variables, functions and error messages", "label": "slow"}
+{"id": "mixer-164", "task": "mixer", "split": "train", "lang": "es", "state": "reescribe el módulo de pagos para soportar varias monedas y actualiza los informes y las pruebas", "label": "slow"}
+{"id": "mixer-165", "task": "mixer", "split": "train", "lang": "en", "state": "debug why the tests fail only in CI: read the logs, the config and the code and propose a fix", "label": "slow"}
+{"id": "mixer-166", "task": "mixer", "split": "train", "lang": "es", "state": "implementa una máquina de estados para este flujo de pedidos y refactoriza el código que la usa", "label": "slow"}
+{"id": "mixer-167", "task": "mixer", "split": "test", "lang": "en", "state": "add type hints to the whole package and fix all the mypy errors without changing behaviour", "label": "slow"}
+{"id": "mixer-168", "task": "mixer", "split": "train", "lang": "es", "state": "escribe un generador de informes en PDF con plantillas, gráficos y pruebas automatizadas", "label": "slow"}
+{"id": "mixer-169", "task": "mixer", "split": "train", "lang": "en", "state": "implement undo/redo for the editor across the model, the commands and the ui", "label": "slow"}
+{"id": "mixer-170", "task": "mixer", "split": "train", "lang": "es", "state": "diseña e implementa un algoritmo de planificación de tareas con dependencias y detecta ciclos", "label": "slow"}
+{"id": "mixer-171", "task": "mixer", "split": "test", "lang": "en", "state": "extract the common code of these five scripts into a library and update each script to use it", "label": "slow"}
+{"id": "mixer-172", "task": "mixer", "split": "train", "lang": "es", "state": "analiza el código de este proyecto, haz un mapa de dependencias y propón un plan de refactor por fases", "label": "slow"}
+{"id": "mixer-173", "task": "mixer", "split": "train", "lang": "en", "state": "write a full test suite for the inventory module covering edge cases and then fix the bugs it reveals", "label": "slow"}
+{"id": "mixer-174", "task": "mixer", "split": "val", "lang": "es", "state": "migra la configuración de variables de entorno a un archivo yaml con validación en todo el proyecto", "label": "slow"}
+{"id": "mixer-175", "task": "mixer", "split": "val", "lang": "en", "state": "implement oauth login flow end to end with the tests and the documentation", "label": "slow"}
+{"id": "mixer-176", "task": "mixer", "split": "test", "lang": "es", "state": "refactoriza esta función de 200 líneas en piezas pequeñas, con pruebas antes y después para asegurar que no cambia", "label": "slow"}
+{"id": "mixer-177", "task": "mixer", "split": "train", "lang": "en", "state": "create a CLI that scans a directory tree, builds an index in sqlite and supports fuzzy search with tests", "label": "slow"}
+{"id": "mixer-178", "task": "mixer", "split": "train", "lang": "es", "state": "resuelve este problema de optimización combinatoria y justifica la solución paso a paso", "label": "slow"}
+{"id": "mixer-179", "task": "mixer", "split": "test", "lang": "en", "state": "make the whole application accessible: audit every page, fix the issues and add automated checks", "label": "slow"}
+{"id": "mixer-180", "task": "mixer", "split": "train", "lang": "es", "state": "reemplaza la librería antigua por la nueva en todos los módulos y adapta cada llamada", "label": "slow"}
+{"id": "mixer-181", "task": "mixer", "split": "train", "lang": "en", "state": "build a rate limiter middleware, integrate it in every route and write tests for bursts", "label": "slow"}
+{"id": "mixer-182", "task": "mixer", "split": "val", "lang": "es", "state": "diseña el sistema de logs del proyecto, aplícalo en todos los módulos y crea las pruebas", "label": "slow"}
+{"id": "mixer-183", "task": "mixer", "split": "test", "lang": "en", "state": "trace the data flow from the request to the database in this codebase and fix the inconsistent validation", "label": "slow"}
+{"id": "mixer-184", "task": "mixer", "split": "train", "lang": "es", "state": "implementa paginación por cursor en la api, el cliente y las pruebas, y documenta el cambio", "label": "slow"}
+{"id": "mixer-185", "task": "mixer", "split": "test", "lang": "en", "state": "write a complete chess move validator with check detection and tests", "label": "slow"}
+{"id": "mixer-186", "task": "mixer", "split": "train", "lang": "es", "state": "crea una herramienta que compare dos árboles de directorios y genere un script de sincronización seguro", "label": "slow"}
+{"id": "mixer-187", "task": "mixer", "split": "train", "lang": "en", "state": "make the checkout flow handle partial payments: change the models, the api, the emails and the tests", "label": "slow"}
+{"id": "mixer-188", "task": "mixer", "split": "train", "lang": "es", "state": "añade exportación a CSV y Excel en todos los informes con pruebas por cada uno", "label": "slow"}
+{"id": "mixer-189", "task": "mixer", "split": "train", "lang": "en", "state": "investigate why memory grows over time in the worker, find the leak and fix it", "label": "slow"}
+{"id": "mixer-190", "task": "mixer", "split": "test", "lang": "es", "state": "implementa búsqueda con resaltado en la interfaz, el servidor y el índice, y prueba todo", "label": "slow"}
+{"id": "mixer-191", "task": "mixer", "split": "train", "lang": "es", "state": "convert the project from callbacks to promises everywhere and verify with the existing tests", "label": "slow"}
+{"id": "mixer-192", "task": "mixer", "split": "val", "lang": "es", "state": "optimiza el uso de memoria de la aplicación midiendo antes y después en varios módulos", "label": "slow"}
+{"id": "mixer-193", "task": "mixer", "split": "val", "lang": "en", "state": "implement a diff and patch utility for text files with tests for the edge cases", "label": "slow"}
+{"id": "mixer-194", "task": "mixer", "split": "train", "lang": "es", "state": "revisa el diseño de esta API, enumera los problemas y reescribe los endpoints afectados con pruebas", "label": "slow"}
+{"id": "mixer-195", "task": "mixer", "split": "val", "lang": "en", "state": "add retries with backoff to every network call in the project and test the failure paths", "label": "slow"}
+{"id": "mixer-196", "task": "mixer", "split": "train", "lang": "es", "state": "genera un sitio estático completo a partir de estos archivos markdown con plantillas y navegación", "label": "slow"}
+{"id": "mixer-197", "task": "mixer", "split": "train", "lang": "en", "state": "debug the intermittent failure in the scheduler by reproducing it, finding the race and patching it", "label": "slow"}
+{"id": "mixer-198", "task": "mixer", "split": "train", "lang": "es", "state": "diseña y programa un sistema de permisos por roles que afecte a modelos, vistas y pruebas", "label": "slow"}
+{"id": "mixer-199", "task": "mixer", "split": "train", "lang": "es", "state": "convert this repository's build system to a new tool and keep every target working", "label": "slow"}
+{"id": "mixer-200", "task": "mixer", "split": "test", "lang": "es", "state": "escribe un compilador sencillo de expresiones a bytecode con una máquina virtual y pruebas", "label": "slow"}
