@@ -3,6 +3,12 @@
 Why things are built the way they are, and what was looked at and NOT built. Moved verbatim from the old `ROADMAP.md` (Oct 2026), plus the
 Phase 0 decisions at the top. Labels in the old text: measured = in `bench/RESULTS.md` / `bench/PERF.md`; estimate = extrapolated; proposal = does not exist.
 
+## Decisión del paso 3 de la Fase 2: int4 por grupos sin calibración, descartado (13 oct 2026)
+- **No pasa el criterio** fijado antes de medir (`bench/INT4_SIM.md`): 24 configuraciones (grupos 32/64/128, simétrica/asimétrica, variantes A y B) en Qwen3-1.7B y Qwen3.5-2B [medido, CPU]. La más cercana, B_g32_asym (cabeza en int8, resto en int4 por grupos de 32 asimétrico), da coseno de logits 0.980 / 0.977 (criterio 0.99), perplejidad +4.6 % / +9.6 % frente a int8 (criterio +3 %) y textos idénticos a int8 solo en 1 de 5 prompts (criterio 4). Falla en todo.
+- **Qué falló:** la cuantización a 4 bits por redondeo al más cercano pierde demasiada información en modelos de 1.7-2B; la asimétrica y el grupo pequeño ayudan (mejor g32 asimétrica) pero no llegan; dejar la cabeza en int8 (variante B) ayuda poco. La mejora de bytes (1127 MB frente a 1723 MB en el 1.7B, 1.4-1.7x en el paso por bytes) no compensa un cambio de calidad de este tamaño.
+- **Aunque pasara, el cálculo habría limitado:** con ~1100 MB por token el suelo de DMA (≈52 ms) queda al nivel del suelo de cálculo del kernel actual (≈53 ms) más el desempaquetado [estimado], así que hacía falta `mmul` int8×int8 para aprovecharlo. `mv_i8_i8` sigue en espera.
+- **Vía cerrada: "int4 sin calibración".** Queda abierta solo como opción de bajo valor esperado: int4 calibrado (GPTQ/AWQ), que no se ha medido y exigiría datos de calibración y mucho cálculo en CPU; no se recomienda sin otra razón.
+
 ## Decisiones del paso 2 de la Fase 2 (13 oct 2026)
 - **Cierre del paso 2 aprobado.** B2 (mejor subconjunto de vocabulario) queda como opcional en ROADMAP, con la condición de que los textos de selección sean distintos de los de evaluación. El paso 3 (int4 simulado en CPU) sigue con el criterio de `bench/INT4_SIM.md`, fijado antes de medir.
 - **`NPU_FAST_VOCAB` en Qwen3.5: opcional con aviso, no visible.** Velocidad +18 %, pero el 8.9 % de los tokens de la salida completa no están en el subconjunto y 9 de 10 respuestas cambian; puede inventar nombres propios. Queda tras la bandera (apagada, solo con reparto de GPU 0 %). La caché del subconjunto es propia por tokenizador porque `fast_vocab` solo validaba la longitud.

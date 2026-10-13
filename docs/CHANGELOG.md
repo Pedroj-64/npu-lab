@@ -3,6 +3,11 @@
 What is built, with the numbers measured when it was built. Moved verbatim from the old `ROADMAP.md` (Oct 2026); what is still open lives in
 [`../ROADMAP.md`](../ROADMAP.md) and the reasons for not building things in [`DECISIONS.md`](DECISIONS.md). Newest measurements first in section 0.
 
+## Fase 2, paso 3 (13 oct 2026): int4 simulado en CPU
+Detalle en [`../bench/INT4_SIM.md`](../bench/INT4_SIM.md); criterio commiteado antes de medir. [medido, CPU, determinista]
+- 24 configuraciones (Qwen3-1.7B y Qwen3.5-2B; grupos 32/64/128; simétrica y asimétrica; todo int4 o cabeza en int8): **ninguna cumple** (coseno >= 0.99, perplejidad <= +3 % frente a int8, 4 de 5 textos idénticos). La mejor, B_g32_asym: coseno 0.980 / 0.977, perplejidad +4.6 % / +9.6 %, 1 de 5 textos idénticos. int4 sin calibración descartado. Bytes por token reproducen el motor (int8: 1723 y 1885 MB/token).
+- Techo por bytes con int4 (por ejemplo B_g32_asym: 1127 MB/token, suelo DMA 52 ms en el 1.7B) = 14 tok/s [estimado], pero el cálculo del kernel actual (~53 ms por token) lo limitaría.
+
 ## Fase 2, paso 1 y paso 2 (13 oct 2026): bytes por token, descomposición, cabeza reducida y costes fijos
 Detalle y criterios fijados antes de medir en [`../bench/FASE2.md`](../bench/FASE2.md) y [`../bench/DMA_READ.md`](../bench/DMA_READ.md). Qwen3.5: [medido, GPU degradada].
 - **Paso 1:** la espera de la NPU por token está en el suelo de DMA (bytes / 22.3 GB/s): 1.00-1.08x en 1.7B, 2B y 4B; 1.22-1.36x en 0.8B y 0.6B (matrices pequeñas). Bytes por token contados desde el motor: 596 / 1720 / 1885 / 4376 MB (0.6B / 1.7B / 2B / 4B).
