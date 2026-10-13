@@ -97,6 +97,10 @@
       <button class="b pri" id="send">Send</button><button class="b" id="stop" disabled>Stop</button><button class="b" id="newchat">New chat</button>
       <select id="backend" title="Where the answer is generated"><option value="local">Local · NPU</option><option value="cloud" disabled>Cloud (set up in Settings)</option></select>
     </div>
+    <div class="row" style="margin-top:8px" id="chatsrow">
+      <label title="Off by default. Chats are stored as files on this PC only."><input type="checkbox" id="savechats"> save chats on this PC</label>
+      <select id="chatlist"></select><button class="b" id="openchat">Open</button><button class="b" id="delchat">Delete</button><button class="b" id="exportchat" title="Download this chat as Markdown">Export .md</button>
+    </div>
     <div class="row" style="margin-top:8px">
       <label>local docs <select id="usedocs"><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label><span class="dim" id="docsinfo"></span>
       <label>web search <select id="useweb"><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label>
@@ -311,7 +315,39 @@ $("recheck").onclick = doctor;
 $("loadllm").onclick = async () => { $("loadllm").disabled = true; $("llmstate").textContent = "loading… (10–20 s)";
   try { await api("/mode", { mode: "llm", model: $("llmsel").value }); toast("Model loaded"); } catch (e) { toast(e.message); } $("loadllm").disabled = false; refresh(); };
 $("unload").onclick = async () => { try { await api("/mode", { mode: "none" }); toast("NPU is free"); } catch (e) { toast(e.message); } refresh(); };
-$("newchat").onclick = () => { HISTORY = []; $("log").textContent = ""; $("stats").textContent = ""; };
+let CHAT_ID = "", CHAT_TITLE = "";
+const newChatId = () => (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : Math.random().toString(36).slice(2) + Date.now().toString(36)).slice(0, 24);
+$("newchat").onclick = () => { HISTORY = []; CHAT_ID = CHAT_TITLE = ""; $("log").textContent = ""; $("stats").textContent = ""; };
+async function refreshChats() {
+  try { const { chats } = await api("/chats"); const sel = $("chatlist"); sel.textContent = "";
+    for (const c of chats) { const o = mk("option", "", `${c.title} · ${c.messages / 2 | 0} turns · ${new Date(c.updated * 1000).toLocaleString()}`); o.value = c.id; sel.append(o); }
+    if (!chats.length) sel.append(mk("option", "", "(no saved chats)"));
+    $("openchat").disabled = $("delchat").disabled = !chats.length;
+  } catch (e) { /* the list is a convenience */ }
+}
+async function saveChat() {
+  if (!$("savechats").checked || !HISTORY.length) return;
+  if (!CHAT_ID) CHAT_ID = newChatId();
+  if (!CHAT_TITLE) CHAT_TITLE = HISTORY[0].content.slice(0, 80);
+  try { await api("/chats/save", { id: CHAT_ID, title: CHAT_TITLE, history: HISTORY }); refreshChats(); } catch (e) { toast(e.message); }
+}
+$("savechats").onchange = async () => { try { await api("/rules", { save_chats: $("savechats").checked }); } catch (e) { toast(e.message); } if ($("savechats").checked) saveChat(); };
+$("openchat").onclick = async () => {
+  if (abort) { toast("Wait for the answer to finish"); return; }
+  try { const c = await api("/chats/load", { id: $("chatlist").value }); HISTORY = c.history; CHAT_ID = c.id; CHAT_TITLE = c.title; $("log").textContent = ""; $("stats").textContent = "";
+    for (const m of HISTORY) { if (m.role === "user") $("log").append(mk("div", "msg me", m.content)); else { const body = mk("div"), box = mk("div", "msg bot"); box.append(body); $("log").append(box); renderMsg({ text: m.content, think: "", body, done: true }); } }
+    $("log").scrollTop = 1e9;
+  } catch (e) { toast(e.message); }
+};
+$("delchat").onclick = async () => {
+  const id = $("chatlist").value; if (!id || !confirm("Delete this saved chat?")) return;
+  try { await api("/chats/delete", { id }); if (id === CHAT_ID) CHAT_ID = CHAT_TITLE = ""; } catch (e) { toast(e.message); } refreshChats();
+};
+$("exportchat").onclick = () => {
+  if (!HISTORY.length) { toast("Nothing to export yet"); return; }
+  const md = HISTORY.map(m => (m.role === "user" ? "## You\n\n" : "## Assistant\n\n") + m.content).join("\n\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" })); a.download = "chat.md"; a.click(); URL.revokeObjectURL(a.href);
+};
 const PHASES = { compacting: "Compacting the conversation (summarising old turns)", mine: "Searching your documents", routing: "Deciding where to look", docs: "Searching local documentation", web: "Searching the web", asking: "Asking the cloud", writing: "Writing" };
 async function send(o = {}) {   // o: {prompt, docs, web, cloud} re-asks the same question with another source choice
   const prompt = o.prompt || $("prompt").value.trim(); if (!prompt || abort) return;
@@ -350,7 +386,7 @@ async function send(o = {}) {   // o: {prompt, docs, web, cloud} re-asks the sam
   } catch (e) { if (e.name !== "AbortError") toast(e.message); }
   msg.done = true; setPhase(""); renderMsg(msg);
   if (msg.text) HISTORY.push({ role: "user", content: prompt }, { role: "assistant", content: msg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim() });
-  abort = null; $("send").disabled = false; $("stop").disabled = true; refresh();
+  abort = null; $("send").disabled = false; $("stop").disabled = true; refresh(); saveChat();
 }
 $("send").onclick = () => send(); $("stop").onclick = () => abort && abort.abort();
 $("prompt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
@@ -468,7 +504,7 @@ addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("chatcard")
   show("setup");
   try { const s = await api("/status"); for (const m of s.models) $("llmsel").append(new Option(({ qwen35s: "Qwen3.5-0.8B · fast (Assisted)", qwen35m: "Qwen3.5-2B · medium (Assisted)", qwen35l: "Qwen3.5-4B · quality, slow (Assisted)", qwen3: "Qwen3-1.7B · medium (NPU only ok)", qwen3s: "Qwen3-0.6B · fast (NPU only ok)" })[m] || m, m)); $("llmsel").value = s.models.includes("qwen35m") ? "qwen35m" : s.models.includes("qwen3") ? "qwen3" : s.models[0];
     { const rl = await api("/rules"); $("roots").value = rl.roots.join("\n"); $("vram").value = rl.llm_vram_gb ?? 4.0; $("ctxwin").value = rl.context_tokens ?? 80000; $("compact").value = Math.round((rl.compact_at ?? 0.7) * 100); $("gshare").value = String(rl.gpu_share ?? 0); $("scache").value = rl.state_cache_gb ?? 8; } } catch (e) { toast(e.message); }
-  await loadSettings(); doctor(); refresh(); pollDocs().catch(() => {}); setInterval(refresh, 1500);
+  await loadSettings(); api("/rules").then(r => { $("savechats").checked = !!r.save_chats; }).catch(() => {}); refreshChats(); doctor(); refresh(); pollDocs().catch(() => {}); setInterval(refresh, 1500);
 })();
 </script>
 </body>

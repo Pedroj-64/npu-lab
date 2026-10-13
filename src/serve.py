@@ -8,7 +8,7 @@ Security model: binds 127.0.0.1 on a random port; every API request needs `Autho
 URL fragment, which never reaches the server); the Host header must be loopback; an Origin header is only
 accepted if it is this server's own origin; no CORS headers; only whitelisted models; folders only under $HOME.
 
-API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /doctor /settings   POST /routing /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
+API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /chats /doctor /settings   POST /routing /chats/save /chats/load /chats/delete /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
 """
 import gc, hmac, json, os, secrets, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -118,6 +118,8 @@ def set_rules(d):
         if not 2048 <= n <= 262144:
             raise Bad(400, "context_tokens must be between 2048 and 262144")
         r["context_tokens"] = n
+    if "save_chats" in d:
+        r["save_chats"] = bool(d["save_chats"])
     if "gpu_vram_gb" in d:
         g = float(d["gpu_vram_gb"])
         if not 0.5 <= g <= 4:
@@ -416,6 +418,9 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/rules":
             import search
             self._send(200, search.rules())
+        elif self.path == "/chats":
+            import chats
+            self._send(200, {"chats": chats.listing()})
         elif self.path == "/doctor":
             self._send(200, {"checks": doctor()})
         elif self.path == "/settings":
@@ -444,6 +449,19 @@ class H(BaseHTTPRequestHandler):
             except documents.DocError as e:
                 raise Bad(400, str(e))
             self._send(200, {"documents": documents.listing()})
+        elif self.path in ("/chats/save", "/chats/load", "/chats/delete"):
+            import chats
+            try:
+                i = str(d.get("id", ""))
+                if self.path == "/chats/save":
+                    self._send(200, chats.save(i, d.get("title", ""), d.get("history") or []))
+                elif self.path == "/chats/load":
+                    self._send(200, chats.load(i))
+                else:
+                    chats.delete(i)
+                    self._send(200, {"chats": chats.listing()})
+            except chats.ChatError as e:
+                raise Bad(400, str(e))
         elif self.path == "/routing":
             import router
             try:
