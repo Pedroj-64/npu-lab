@@ -113,12 +113,12 @@ FAST_VOCAB = 4 * LM_ROWS          # rows kept by the optional fast vocabulary: 4
 VOCAB_CACHE = os.path.expanduser("~/.local/share/npu-lab/vocab_fast.npy")
 
 
-def fast_vocab(tok, V):
+def fast_vocab(tok, V, cache=VOCAB_CACHE):
     """Token ids kept by the fast output head (the lm_head streams ~233 MB per token; this cuts it ~4x). Chosen by how often a token
     appears in the local docs index and in the system's es/fr/pt/de/it translations (es counts triple), always keeping the 256 byte
     tokens and the special tokens, so any text can still be written (rare words just come out in smaller pieces). Cached on disk."""
-    if os.path.exists(VOCAB_CACHE):
-        v = np.load(VOCAB_CACHE)
+    if os.path.exists(cache):
+        v = np.load(cache)
         if len(v) == FAST_VOCAB:
             return v
     import glob, gettext, pickle, re
@@ -146,8 +146,8 @@ def fast_vocab(tok, V):
     score[ok & nolet] = 1e29                                                   # every punctuation/space/symbol token (``` fences, indentation...) stays
     score[:256] = 1e30; score[tok.token_to_id("<|endoftext|>"):tok.get_vocab_size()] = 1e30              # byte tokens and the specials (<|endoftext|>, <|im_start|>, <|im_end|>)
     v = np.sort(np.argsort(-score, kind="stable")[:FAST_VOCAB]).astype(np.int64)
-    os.makedirs(os.path.dirname(VOCAB_CACHE), exist_ok=True)
-    np.save(VOCAB_CACHE, v)
+    os.makedirs(os.path.dirname(cache), exist_ok=True)
+    np.save(cache, v)
     return v
 
 

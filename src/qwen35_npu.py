@@ -85,7 +85,7 @@ def zrms_np(x, w, eps):
 
 
 class Qwen35(Q.Qwen):
-    def __init__(self, d="models/qwen35_2b", max_ctx=8192, vram_gb=4.0, gpu=True, gpu_share=0.0, cache_gb=0.0):
+    def __init__(self, d="models/qwen35_2b", max_ctx=8192, vram_gb=4.0, gpu=True, gpu_share=0.0, cache_gb=0.0, fast_head=None):
         import gpu_qwen35
         if not (gpu and gpu_qwen35.available()):
             raise RuntimeError("Qwen3.5 needs the GPU: switch to the Assisted profile (or use a Qwen3 model for NPU only)")
@@ -138,8 +138,19 @@ class Qwen35(Q.Qwen):
         lap("layers on the NPU")
         V = c["vocab_size"]
         mn, mg = split_rows(V, self.share) if self.share > 0 else (V, 0)
-        tail = gpu_qwen35.GpuTail(self.g, self.g.lm_tail(self.embed_raw, mn, V), 0, mg) if mg else None
-        self.lm = mk(self.embed_raw[:mn], chunks=Q.lm_chunks(mn), tail=tail)           # tied embeddings; with a GPU share the GPU keeps the last rows
+        if fast_head is None:
+            fast_head = os.environ.get("NPU_FAST_VOCAB") == "1"          # off by default: the output head over a subset of the vocabulary (see bench/FASE2.md, batch B)
+        if fast_head and self.share > 0:
+            print("[NPU_FAST_VOCAB ignored: it does not combine with a GPU share]", file=sys.stderr)
+            fast_head = False
+        if fast_head:
+            # the cache is per tokenizer: Qwen3 and Qwen3.5 share only 281 token ids, and fast_vocab's own check is just the length
+            self.vsub = Q.fast_vocab(self.tok, V, cache=os.path.expanduser(f"~/.local/share/npu-lab/vocab_fast_qwen35_{V}.npy"))
+            self.vpos = np.full(V, -1, np.int64); self.vpos[self.vsub] = np.arange(len(self.vsub))
+            self.lm = mk(np.ascontiguousarray(self.embed_raw[self.vsub]), chunks=[Q.LM_ROWS] * (len(self.vsub) // Q.LM_ROWS))
+        else:
+            tail = gpu_qwen35.GpuTail(self.g, self.g.lm_tail(self.embed_raw, mn, V), 0, mg) if mg else None
+            self.lm = mk(self.embed_raw[:mn], chunks=Q.lm_chunks(mn), tail=tail)           # tied embeddings; with a GPU share the GPU keeps the last rows
         lap("lm_head")
         gen = os.path.join(d, "generation_config.json")
         self.eos = set(np.atleast_1d(json.load(open(gen)).get("eos_token_id", []))) if os.path.exists(gen) else set()
@@ -220,7 +231,7 @@ def main():
 def load_engine(d, **kw):
     """The right engine for a model folder: Qwen3.5 (hybrid, needs the GPU) or Qwen3 (dense)."""
     if json.load(open(f"{d}/config.json")).get("model_type") == "qwen3_5":
-        return Qwen35(d, **{k: v for k, v in kw.items() if k in ("max_ctx", "vram_gb", "gpu", "gpu_share", "cache_gb")})
+        return Qwen35(d, **{k: v for k, v in kw.items() if k in ("max_ctx", "vram_gb", "gpu", "gpu_share", "cache_gb", "fast_head")})
     return Q.Qwen(d, **{k: v for k, v in kw.items() if k in ("max_ctx", "vram_gb", "gpu", "fast_head")})
 
 
