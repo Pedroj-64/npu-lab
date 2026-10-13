@@ -3,6 +3,14 @@
 What is built, with the numbers measured when it was built. Moved verbatim from the old `ROADMAP.md` (Oct 2026); what is still open lives in
 [`../ROADMAP.md`](../ROADMAP.md) and the reasons for not building things in [`DECISIONS.md`](DECISIONS.md). Newest measurements first in section 0.
 
+## Fase 2, paso 1 y paso 2 (13 oct 2026): bytes por token, descomposición, cabeza reducida y costes fijos
+Detalle y criterios fijados antes de medir en [`../bench/FASE2.md`](../bench/FASE2.md) y [`../bench/DMA_READ.md`](../bench/DMA_READ.md). Qwen3.5: [medido, GPU degradada].
+- **Paso 1:** la espera de la NPU por token está en el suelo de DMA (bytes / 22.3 GB/s): 1.00-1.08x en 1.7B, 2B y 4B; 1.22-1.36x en 0.8B y 0.6B (matrices pequeñas). Bytes por token contados desde el motor: 596 / 1720 / 1885 / 4376 MB (0.6B / 1.7B / 2B / 4B).
+- **Lote A (descomposición del paso, 2B y 4B):** espera NPU 65-67 %, coste de llamadas 7-8 %, pasos DeltaNet de GPU 21-22 % (59-79 % de eso es tiempo de núcleos en una GPU degradada), atención de GPU 3-6 %, pegamento de CPU 1 %. Cota del ahorro por fusionar lanzamientos y copias de GPU: 13 % (2B) y 7 % (4B), solo con GPU.
+- **Lote B (`NPU_FAST_VOCAB` en Qwen3.5-2B, bandera apagada):** +18.1 % de velocidad (139.1 ± 0.9 -> 117.8 ± 0.5 ms/token, 3 + 3), pero 8.92 % de los tokens de la salida completa fuera del subconjunto y 1/10 textos idénticos: "opcional con aviso". Caché del vocabulario separada por tokenizador (Qwen3 y Qwen3.5 comparten 281 ids).
+- **Lote C (costes fijos por llamada):** reutilizar `pyxrt.run` ahorra 19-39 µs por llamada en el microbenchmark y baja el coste de envío 33 %, pero el paso solo 1.3 % (2B) y 0.3 % (1.7B): descartado y revertido. Techo del coste fijo expuesto: 4-5 % del paso.
+- `mv_i8_i8` no se ha escrito (en espera).
+
 ## Fase 2, carril CPU y medición de DMA (13 oct 2026)
 Detalle en [`../bench/DMA_READ.md`](../bench/DMA_READ.md). Criterio de decisión commiteado antes de medir.
 - **Lectura pura frente al kernel real [medido, 3 procesos, desviación <= 2.5 %]:** r = T_ro / T_real = 0.97-1.03 en 1, 2 y 4 columnas y 4-17 MB; BW de lectura 6.6 / 12.3 / 21.8 GB/s (1 / 2 / 4 columnas). La transformación del DMA no cuesta. Contención: 8 procesos copiando memoria bajan la lectura de 20.5 a 12.0 GB/s (-42 %). Con 4 columnas, un segundo canal por columna no sube el techo (20.2 -> 21.0 GB/s).

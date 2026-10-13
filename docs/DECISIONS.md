@@ -3,6 +3,12 @@
 Why things are built the way they are, and what was looked at and NOT built. Moved verbatim from the old `ROADMAP.md` (Oct 2026), plus the
 Phase 0 decisions at the top. Labels in the old text: measured = in `bench/RESULTS.md` / `bench/PERF.md`; estimate = extrapolated; proposal = does not exist.
 
+## Decisiones del paso 2 de la Fase 2 (13 oct 2026)
+- **`NPU_FAST_VOCAB` en Qwen3.5: opcional con aviso, no visible.** Velocidad +18 %, pero el 8.9 % de los tokens de la salida completa no están en el subconjunto y 9 de 10 respuestas cambian; puede inventar nombres propios. Queda tras la bandera (apagada, solo con reparto de GPU 0 %). La caché del subconjunto es propia por tokenizador porque `fast_vocab` solo validaba la longitud.
+- **No se reutilizan las ejecuciones de XRT (`NPU_RUN_REUSE`):** el envío ya estaba escondido bajo el DMA; ahorrarlo no acelera el paso (0.3-1.3 %). La sincronización de la salida (`bc.sync`) es necesaria: sin ella los resultados cambian.
+- **No se persigue más la reducción de costes fijos de llamada ni del pegamento de CPU:** techo medido 4-5 % y 1 % del paso.
+- **Fusión de lanzamientos de la GPU (DeltaNet):** el ahorro posible (13 % en el 2B, 7 % en el 4B) solo puede juzgarse con una GPU sana; queda pendiente de diagnosticar la GPU degradada.
+
 ## Corrección de la Fase 2 sobre el DMA (13 oct 2026)
 - **El decode de un token está limitado por el DMA de lectura, no por el cálculo** [medido, `bench/DMA_READ.md`]: un diseño de solo lectura con la misma topología tarda lo mismo que el kernel real (r = 0.97-1.03; con 4 columnas y >= 16 MB, r = 1.006) y rinde 6.6 / 12.3 / 21.8 GB/s con 1 / 2 / 4 columnas. La frase "el kernel está a ~1.5x de su suelo de MAC int16, no limitado por DMA" (CHANGELOG, backlog; encargo) era falsa para NV=1: el suelo de MAC (~270 µs por vector con 2 columnas) es ~60 % del tiempo de DMA y solo domina con NV >= 2, que es lo que midió `mv_i8_nv`.
 - **No se escribe `mv_i8_i8` para el decode de un token** (criterio r >= 0.85 fijado antes de medir). Sigue en pie "no construir decodificación especulativa sobre este kernel", con un matiz: un núcleo `mmul` int8×int8 quitaría el límite de cálculo con lotes y podría hacerla viable; es una propuesta aparte, pendiente de tu OK.
