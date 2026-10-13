@@ -71,3 +71,21 @@ Con 4 columnas el segundo canal no aporta: el techo (~21-22 GB/s de lectura) es 
 - Cuadra con la Fase 0 [medido, `PERF.md` §3]: el `wait` por token del 1.7B (81.5 ms para 1.72 GB) está a 3 % del suelo de lectura a 21.8 GB/s (78.9 ms); en el 0.6B (34.8 ms para 0.60 GB, suelo 27.3 ms) quedan ~7.5 ms (22 %) de costes fijos por llamada.
 - **Lo que la medición NO dice y es importante:** el suelo de cálculo existe y es menor que el de DMA solo mientras NV=1. Con los datos de `mv_i8_nv` (4864x896, 2 columnas: 448 / 571 / 1069 µs para NV = 1 / 2 / 4) el cálculo por vector ronda **~270 µs, ~60 % del tiempo de DMA** [estimado]; con NV >= 2 el cálculo pasa a ser el límite. Por eso la verificación en lote cuesta 1.25x (NV=2) y 2.3x (NV=4). Un núcleo con `mmul` int8×int8 (256 MAC por instrucción frente a los 32 actuales) bajaría ese techo de cálculo muy por debajo del de DMA: **solo sirve para lotes** (verificación especulativa, resúmenes en paralelo), no para el token único. Estimación [no medida]: NV=4 pasaría de ~2.3x a ~1.0-1.2x.
 - Qué sí puede acelerar el token único: menos bytes por token (int4, cabeza de salida reducida), reparto con la GPU (la GPU lee sus filas de la VRAM, fuera de este DDR) y evitar contención de DDR durante el decode.
+
+## 3. Paso 1 de la Fase 2: bytes por token frente a lo medido [medido, 13 oct 2026]
+`bench/bytes_floor.py` (un proceso por modelo; 3 corridas de 48 tokens tras 1 de calentamiento; contexto corto, ~16-64 tokens). Los bytes se cuentan de los objetos `NpuLin` que construye el motor (incluye relleno y la cabeza de salida), no de la configuración. Suelo de DMA = bytes / 22.3 GB/s (pendiente del ajuste de 4 columnas, `§1`); el límite superior suma 0.080 ms por llamada (ordenada del mismo ajuste, llamada síncrona: el motor envía juntas las llamadas de una matriz, así que lo real queda entre los dos). Crudos: `bench/bytes_floor.jsonl`. Las filas "assisted" usan la GPU y se midieron con la **GPU degradada** [medido, GPU degradada].
+
+| modelo | MB int8 por token | llamadas NPU por token | suelo DMA ms (solo bytes - con llamadas) | espera NPU medida ms | espera / suelo | GB/s efectivos | submit + prep + post ms | resto (CPU/GPU) ms | paso total ms | tok/s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Qwen3-0.6B (solo NPU) | 596 | 212 | 26.7 - 43.7 | 36.2 ± 0.1 | 1.36 | 16.5 | 8.8 | 6.5 | 51.5 ± 0.3 | 19.4 |
+| Qwen3-1.7B (solo NPU) | 1720 | 184 | 77.2 - 91.9 | 83.4 ± 0.2 | 1.08 | 20.6 | 9.8 | 7.2 | 100.4 ± 0.2 | 9.96 |
+| Qwen3.5-0.8B | 766 | 218 | 34.4 - 51.8 | 42.0 ± 0.0 | 1.22 | 18.3 | 10.2 | 27.2 | 79.4 ± 2.6 | 12.6 |
+| Qwen3.5-2B | 1885 | 170 | 84.5 - 98.1 | 89.8 ± 2.0 | 1.06 | 21.0 | 11.2 | 39.6 | 140.6 ± 3.2 | 7.11 |
+| Qwen3.5-2B, reparto GPU 50 % | 940 | 157 | 42.2 - 54.7 | 49.0 ± 0.0 | 1.16 | 19.2 | 84.6 | 24.1 | 157.7 ± 0.1 | 6.34 |
+| Qwen3.5-4B | 4376 | 282 | 196.3 - 218.8 | 196.9 ± 2.5 | 1.00 | 22.2 | 19.7 | 80.2 | 296.7 ± 2.6 | 3.37 |
+
+Lectura:
+- **La espera de la NPU está en el suelo de DMA** salvo en los modelos pequeños: 1.00-1.08x en 1.7B, 2B y 4B; 1.22-1.36x en 0.8B y 0.6B, donde las matrices son más pequeñas (menos GB/s efectivos: 4 MB rinden ~16 GB/s en `§1`) y pesan más las llamadas. Los bytes contados coinciden con la Fase 0 (596 y 1720 MB). Cuadra con `§2`: no hay margen de cálculo ni de topología que ganar en la espera.
+- **Qué queda fuera de la espera:** 17 % del paso en el 1.7B (17 ms), 30 % en el 0.6B, **36 % en el 2B (51 ms) y 34 % en el 4B (100 ms)** [medido, GPU degradada]: GPU (DeltaNet, atención, lectura), CPU y sincronización. Ahí está la otra mitad de la mejora posible, pero con la GPU como está hoy no es comparable con el CHANGELOG (2B: 112 ms en una GPU sana).
+- **El reparto 50 % de la GPU no ayuda con esta GPU** (157.7 ms frente a 140.6): la NPU lee la mitad de los bytes (940 MB, espera 49 ms), pero la parte de la GPU (`submit` 84.6 ms) la retrasa. Es el síntoma de la GPU degradada, no del diseño.
+- **Techo para un token, solo por bytes [estimado]:** halvar los bytes (int4) bajaría la espera a ~42 / 45 / 98 ms en 1.7B / 2B / 4B, o sea, paso total ~58 / 96 / 198 ms (1.7x / 1.46x / 1.50x) manteniendo el resto igual. El 27 % de los bytes del 2B es la cabeza de salida (509 MB): `NPU_FAST_VOCAB` es el paso 2.
