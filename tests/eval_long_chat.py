@@ -26,28 +26,32 @@ HISTORY, rows = [], []
 
 
 def say(prompt):
+    """One turn like the web page does it: the answer is complete at `done`; notes from a compaction may arrive afterwards on the same stream."""
     if time.time() - t0 > DEADLINE:
         raise SystemExit(f"deadline of {DEADLINE}s reached at turn {len(rows) + 1}")
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=240)
     c.request("POST", "/chat", json.dumps({"prompt": prompt, "tokens": TOKENS, "history": HISTORY, "docs": "off", "web": "off", "mine": "off"}), {"Authorization": "Bearer " + T, "Host": f"127.0.0.1:{port}"})
-    r = c.getresponse(); out, st, compacted, t = "", {}, False, time.time()
+    r = c.getresponse(); out, st, kind, t, answered, ans = "", {}, "", time.time(), None, ""
     if r.status != 200:
         raise SystemExit(f"/chat -> {r.status} {r.read()[:200]!r}")
     for line in r:
         m = json.loads(line)
         out += m.get("token", "")
+        if m.get("done") is True:
+            st, answered = m.get("stats", {}), time.time() - t
+            ans = out.split("</think>")[-1].strip()
+            HISTORY.extend([{"role": "user", "content": prompt}, {"role": "assistant", "content": ans}])
         if m.get("compacted"):
-            s = m["compacted"]; compacted = True
+            s = m["compacted"]; kind = "before" if answered is None else "after"
             print("   notes after compaction:", repr(s["summary"][:400]), flush=True)
             HISTORY[:] = [{"role": "user", "content": "[Notes of the earlier conversation]\n" + s["summary"]}, {"role": "assistant", "content": "Understood, I will use those notes."}, *HISTORY[-s["kept"]:]]
+        if m.get("warning"):
+            print("   warning:", m["warning"][:200], flush=True)
         if m.get("error"):
             raise SystemExit("engine error: " + str(m["error"]))
-        if m.get("done"):
-            st = m.get("stats", {})
-    ans = out.split("</think>")[-1].strip()
-    HISTORY.extend([{"role": "user", "content": prompt}, {"role": "assistant", "content": ans}])
-    rows.append((time.time() - t, st.get("prefill_tokens", 0), st.get("reused_tokens", 0), st.get("decode_tokens", 0) / max(st.get("decode_s", 1e-9), 1e-9), compacted))
-    print(f"turn {len(rows):2d}: {rows[-1][0]:5.1f}s  read {rows[-1][1]:5d} (reused {rows[-1][2]:5d})  {rows[-1][3]:4.1f} tok/s{'  [compacted]' if compacted else ''}  | {ans[:70]!r}", flush=True)
+    total = time.time() - t
+    rows.append((answered, st.get("prefill_tokens", 0), st.get("reused_tokens", 0), st.get("decode_tokens", 0) / max(st.get("decode_s", 1e-9), 1e-9), kind, total - answered))
+    print(f"turn {len(rows):2d}: {answered:5.1f}s  read {rows[-1][1]:5d} (reused {rows[-1][2]:5d})  {rows[-1][3]:4.1f} tok/s{f'  [compacted {kind}, tidy {total - answered:.0f}s]' if kind else ''}  | {ans[:70]!r}", flush=True)
     return ans
 
 
@@ -89,7 +93,7 @@ try:
     a, b = [r[0] for r in rows[2:7]], [r[0] for r in rows[-6:-2]]
     slow = (sum(b) / len(b)) / max(sum(a) / len(a), 1e-9)
     print(("PASS" if slow < 2.0 else "FAIL") + f" late turns are not much slower than early ones ({slow:.2f}x, limit 2x)"); slow >= 2.0 and fails.append("slowdown")
-    print(f"compactions: {sum(r[4] for r in rows)}, total {time.time() - t0:.0f}s")
+    print(f"compactions: {sum(bool(r[4]) for r in rows)} ({sum(r[4] == 'after' for r in rows)} after the answer), longest wait before an answer {max(r[0] for r in rows):.1f}s vs median {sorted(r[0] for r in rows)[len(rows) // 2]:.1f}s, total {time.time() - t0:.0f}s")
 finally:
     call("/mode", {"mode": "none"}, timeout=60) if p.poll() is None else None
     p.terminate()

@@ -352,18 +352,29 @@ $("exportchat").onclick = () => {
   const md = HISTORY.map(m => (m.role === "user" ? "## You\n\n" : "## Assistant\n\n") + m.content).join("\n\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" })); a.download = "chat.md"; a.click(); URL.revokeObjectURL(a.href);
 };
+let TIDY = Promise.resolve();      // resolves when the stream of the last answer is fully read (notes from a compaction can arrive after the answer)
 const PHASES = { compacting: "Compacting the conversation (summarising old turns)", mine: "Searching your documents", routing: "Deciding where to look", docs: "Searching local documentation", web: "Searching the web", asking: "Asking the cloud", writing: "Writing" };
 async function send(o = {}) {   // o: {prompt, docs, web, cloud} re-asks the same question with another source choice
   const prompt = o.prompt || $("prompt").value.trim(); if (!prompt || abort) return;
+  if (await Promise.race([TIDY.then(() => 0), new Promise(r => setTimeout(() => r(1), 150))])) { $("stats").textContent = "tidying up the conversation (summarising old turns)…"; await TIDY; }
+  if (abort) return;      // another click got in while we waited
+  let release; TIDY = new Promise(r => release = r);
   const cloud = o.cloud ?? $("backend").value === "cloud";
   if (o.prompt && HISTORY.length >= 2 && HISTORY[HISTORY.length - 2].content === prompt) HISTORY.splice(-2);
-  if (!cloud && (!ST || ST.mode !== "llm")) { toast("Load a model first (or choose Cloud)"); return; }
+  if (!cloud && (!ST || ST.mode !== "llm")) { toast("Load a model first (or choose Cloud)"); release(); return; }
   if (!o.prompt) $("prompt").value = ""; const me = mk("div", "msg me", prompt); $("log").append(me);
   const box = mk("div", "msg bot"), srcs = mk("div", "src"), phase = mk("div", "phase"), body = mk("div");
   box.append(phase, srcs, body); $("log").append(box); $("log").scrollTop = 1e9;
   const msg = { text: "", think: "", body, done: false };
   const setPhase = t => { phase.textContent = ""; if (t) { phase.append(mk("span", "", t), mk("span", "dots")); } };
   setPhase("Thinking"); $("send").disabled = true; $("stop").disabled = false; abort = new AbortController();
+  let finished = false;
+  const finish = () => {            // the answer is complete (or stopped): the user can already write the next question
+    if (finished) return; finished = true;
+    msg.done = true; setPhase(""); renderMsg(msg);
+    if (msg.text) HISTORY.push({ role: "user", content: prompt }, { role: "assistant", content: msg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim() });
+    abort = null; $("send").disabled = false; $("stop").disabled = true; refresh(); saveChat();
+  };
   let raf = 0; const draw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderMsg(msg); $("log").scrollTop = 1e9; }); };
   try {
     const r = await fetch("/chat", { method: "POST", signal: abort.signal, headers: { "Authorization": "Bearer " + TOKEN, "Content-Type": "application/json" },
@@ -380,17 +391,15 @@ async function send(o = {}) {   // o: {prompt, docs, web, cloud} re-asks the sam
           if (!cloud && m.route.escalate && ST && ST.cloud) act("ask the cloud", { cloud: true });
           box.insertBefore(rl, srcs); }
         if (m.compacted) { HISTORY = [{ role: "user", content: "[Notes of the earlier conversation]\n" + m.compacted.summary }, { role: "assistant", content: "Understood, I will use those notes." }, ...HISTORY.slice(-m.compacted.kept)];
-          box.insertBefore(mk("div", "src", "Conversation compacted: older turns were summarised so the window stays free."), body); }
+          box.insertBefore(mk("div", "src", "Conversation compacted: older turns were summarised so the window stays free."), body); if (finished) saveChat(); }
         if (m.warning) { box.insertBefore(mk("div", "warn", m.warning), body); }
         if (m.sources) { srcs.textContent = "sources: "; m.sources.forEach((s, k) => { if (k) srcs.append(", "); if (s.url && /^https?:/.test(s.url)) { const a = mk("a", "", s.src); a.href = s.url; a.target = "_blank"; a.rel = "noopener noreferrer"; srcs.append(a); } else srcs.append(s.src); }); }
         if (m.think) { msg.think += m.think; setPhase("Thinking"); draw(); }
         if (m.token) { if (!msg.text) setPhase(""); msg.text += m.token; draw(); }
         if (m.error) toast(m.error);
-        if (m.done) { const s = m.stats || {}; $("stats").textContent = s.backend === "cloud" ? `cloud · ${s.seconds}s` : `${(s.decode_tokens / Math.max(s.decode_s, 1e-9)).toFixed(1)} tok/s · prompt ${s.prefill_tokens} tokens (${s.reused_tokens || 0} reused) read in ${s.prefill_s.toFixed(1)} s`; } } }
+        if (m.done === true) { finish(); const s = m.stats || {}; $("stats").textContent = s.backend === "cloud" ? `cloud · ${s.seconds}s` : `${(s.decode_tokens / Math.max(s.decode_s, 1e-9)).toFixed(1)} tok/s · prompt ${s.prefill_tokens} tokens (${s.reused_tokens || 0} reused) read in ${s.prefill_s.toFixed(1)} s`; } } }
   } catch (e) { if (e.name !== "AbortError") toast(e.message); }
-  msg.done = true; setPhase(""); renderMsg(msg);
-  if (msg.text) HISTORY.push({ role: "user", content: prompt }, { role: "assistant", content: msg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim() });
-  abort = null; $("send").disabled = false; $("stop").disabled = true; refresh(); saveChat();
+  finish(); setPhase(""); release();
 }
 $("send").onclick = () => send(); $("stop").onclick = () => abort && abort.abort();
 $("prompt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } };

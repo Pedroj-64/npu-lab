@@ -10,7 +10,7 @@ accepted if it is this server's own origin; no CORS headers; only whitelisted mo
 
 API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /chats /facts /doctor /settings   POST /routing /facts /chats/save /chats/load /chats/delete /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
 """
-import gc, hmac, json, os, secrets, sys, threading, time
+import gc, hmac, json, os, re, secrets, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -208,7 +208,7 @@ def compact(history, window, at, keep, phase):
     pieces = [tok.decode(ids[i:i + step]) for i in range(0, len(ids), step)]
     notes = ""
     for k, piece in enumerate(pieces):
-        phase(done=k, of=len(pieces))
+        phase(step=k, of=len(pieces))          # not "done": the page reads {"done": true} as the end of the answer
         notes = S.engine.complete(f"Previous notes:\n{notes or '(none)'}\n\nNext part of the conversation:\n{piece}\n\nWrite the updated notes.",
                                   SUMMARY_SYSTEM, 400).strip()
     import pins
@@ -592,9 +592,23 @@ class H(BaseHTTPRequestHandler):
                         self._line({kind: piece})
                     self._line({"done": True, "stats": {"backend": "cloud", "seconds": round(time.time() - t0, 1)}})
                 else:
+                    pieces = []
                     for piece in S.engine.stream(prompt, n, ctx or None, history, lambda name, **kw: self._line({"phase": name, **kw}), system=__import__("facts").as_system(__import__("qwen_npu").SYSTEM)):
+                        pieces.append(piece)
                         self._line({"token": piece})
                     self._line({"done": True, "stats": {"backend": "local", **S.engine.stats}})
+                    # tidy up AFTER the answer, while the user reads it: the notes arrive on this same stream and the page applies them before the next question
+                    answer = re.sub(r"<think>[\s\S]*?(</think>|$)", "", "".join(pieces)).strip()
+                    if answer:
+                        try:
+                            new, info = compact(history + [{"role": "user", "content": prompt}, {"role": "assistant", "content": answer}], S.engine.max_ctx, float(rl.get("compact_at", 0.7)),
+                                                int(rl.get("keep_turns", 3)), lambda **kw: self._line({"phase": "compacting", **kw}))
+                            if info:
+                                self._line({"compacted": info})
+                        except (BrokenPipeError, ConnectionResetError):
+                            raise
+                        except Exception as e:
+                            self._line({"warning": f"could not compact the conversation: {type(e).__name__}: {e}"})
             except (BrokenPipeError, ConnectionResetError):
                 pass                      # client left: stop generating
             except Exception as e:
