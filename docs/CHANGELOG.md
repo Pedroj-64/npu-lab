@@ -3,6 +3,9 @@
 What is built, with the numbers measured when it was built. Moved verbatim from the old `ROADMAP.md` (Oct 2026); what is still open lives in
 [`../ROADMAP.md`](../ROADMAP.md) and the reasons for not building things in [`DECISIONS.md`](DECISIONS.md). Newest measurements first in section 0.
 
+## Reparto de GPU por modelo y perfil de máxima velocidad (13 oct 2026)
+[medido] 2B al 75 %: coseno de logits >= 0.99994 y perplejidad +0.50 % frente a 0 % (el 50 % da +0.23 %); 300 s sostenidos sin caída (18.6-19.1 tok/s, ~59-60 W, GPU <= 69 °C, CPU hasta 93 °C). Defectos: 2B 50 %, 4B 0 % (25 % opt-in con aviso). Reparto por modelo en `rules.json` (`gpu_share` pasa de número a objeto `{modelo: reparto}`): **un reparto escalar de un archivo antiguo se ignora** y vale el defecto de cada modelo. Si faltan los kernels de un reparto, la interfaz lo atenúa y muestra el comando de compilación (~80 s); cargar también se niega con ese comando. Nuevo margen configurable de memoria de GPU para el escritorio (`vram_margin_mib`, 700 MiB): se niega la carga que lo rompa. `StateCache` en 0700/0600. Detalle: `bench/PROPUESTA_GPU_SANA.md`.
+
 ## Fase 5, lote 2 (13 oct 2026): puerta de inyección de documentos
 Criterios, banco v2 (1091 consultas) y resultados en [`../bench/FASE56.md`](../bench/FASE56.md). [medido, CPU] `src/gate.py` (apagado): inyección en negativos difíciles 0.578 -> 0.043 en palabras corrientes con nombre de comando (plantillas) y 0.588 -> 0.235 en preguntas técnicas naturales (n = 17), recall@4 sin pérdida medible, +34 ms. Cumple el margen escrito (G1-G4); se propone encender con tu OK. El ranking híbrido BM25 da +0.038 de recall@4 [+0.005, +0.076]: no llega al margen de +0.05, sigue apagado.
 
