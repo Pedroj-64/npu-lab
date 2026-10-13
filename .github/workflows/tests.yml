@@ -1,5 +1,5 @@
 name: tests
-# Only the offline tests: no NPU, no GPU, no model files. test_server.py and the eval_* scripts need the hardware and are not run here.
+# Only the offline tests: no NPU, no GPU, no model files (tesseract and poppler are needed by test_documents). test_server.py and the eval_* scripts need the hardware and are not run here.
 on:
   push:
   pull_request:
@@ -11,6 +11,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng poppler-utils
       - run: pip install numpy pillow tokenizers safetensors scipy ml_dtypes
       - run: |
           for t in test_agent test_project test_compact test_pins test_documents test_chats; do
