@@ -12,8 +12,9 @@ assert p[0].startswith("My project is called Nebula") and "8431" in p[0], p     
 assert any("server.py" in l for l in p) and not any("fish shell" in l for l in p), p
 assert not any("8432" in l for l in p)
 # a second compaction receives the first block inside the notes message: facts carry over once, not twice
-again = pins.pin([{"role": "user", "content": "[Notes of the earlier conversation]\n" + pins.block(p) + "the model's summary"}] + old)
+again = pins.pin([{"role": "user", "content": "[Notes of the earlier conversation]\n" + pins.block(p) + "* Project: Nebula, port 8431 (the model's summary bullet)"}] + old)
 assert again == p, again
-assert len(pins.pin([{"role": "user", "content": f"port {i} is open"} for i in range(40)])) == pins.MAX_LINES
+many = pins.pin([{"role": "user", "content": f"port {i} is open"} for i in range(40)])
+assert len(many) == pins.MAX_LINES and many[0] == "port 0 is open" and many[-1] == "port 39 is open", many      # oldest and newest are kept
 assert pins.pin([{"role": "user", "content": "hello there, how are you today"}]) == [] and pins.block([]) == ""
 print("pins ok")

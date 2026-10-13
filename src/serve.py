@@ -192,28 +192,34 @@ def doctor():
 
 SUMMARY_SYSTEM = ("You compress a conversation into notes for yourself. Keep every name, number, file name, command, code identifier, decision, "
                   "constraint and open question; drop greetings and repetition. Write in the language of the conversation, as plain bullet points, "
-                  "at most 300 words.")
+                  "at most 150 words.")
+NOTES_HEAD, NOTES_TOKENS = "[Notes of the earlier conversation]\n", 250      # short notes: writing them is what a compaction costs (decode speed)
 
 
 def compact(history, window, at, keep, phase):
     """When the conversation passes `at` of the context window, summarise all but the last `keep` turns with the loaded model.
+    Incremental: the notes of an earlier compaction are the starting point and only the turns that aged out since are summarised.
     Returns (history, None) untouched, or (notes + recent turns, {"summary", "kept"}). at = 0 disables it."""
     tok = S.engine.tok
     count = lambda t: len(tok.encode(t, add_special_tokens=False).ids)
     if not at or len(history) <= keep * 2 or sum(count(m["content"]) + 8 for m in history) < window * at:
         return history, None
     old, recent = history[:-keep * 2], history[-keep * 2:]
-    ids = tok.encode("\n".join(f"{m['role']}: {m['content']}" for m in old), add_special_tokens=False).ids
-    step = max(512, int(window * 0.4))                    # pieces that fit comfortably next to the notes and the instructions
+    notes, body = "", old
+    if len(old) >= 2 and old[0]["content"].startswith(NOTES_HEAD):         # earlier notes: keep them (minus their pinned block, which is rebuilt) and read only what is new
+        notes, body = old[0]["content"][len(NOTES_HEAD):].split("Summary:\n", 1)[-1].strip(), old[2:]
+        if not body:
+            return history, None
+    ids = tok.encode("\n".join(f"{m['role']}: {m['content']}" for m in body), add_special_tokens=False).ids
+    step = max(1024, int(window * 0.6))                   # one piece in the usual case: every extra piece is another round of writing notes
     pieces = [tok.decode(ids[i:i + step]) for i in range(0, len(ids), step)]
-    notes = ""
     for k, piece in enumerate(pieces):
         phase(step=k, of=len(pieces))          # not "done": the page reads {"done": true} as the end of the answer
         notes = S.engine.complete(f"Previous notes:\n{notes or '(none)'}\n\nNext part of the conversation:\n{piece}\n\nWrite the updated notes.",
-                                  SUMMARY_SYSTEM, 400).strip()
+                                  SUMMARY_SYSTEM, NOTES_TOKENS).strip()
     import pins
     notes = pins.block(pins.pin(old)) + notes                   # the user's own fact lines word for word: a summary may drop or change a digit
-    pair = [{"role": "user", "content": "[Notes of the earlier conversation]\n" + notes}, {"role": "assistant", "content": "Understood, I will use those notes."}]
+    pair = [{"role": "user", "content": NOTES_HEAD + notes}, {"role": "assistant", "content": "Understood, I will use those notes."}]
     return pair + recent, {"summary": notes, "kept": len(recent)}
 
 
