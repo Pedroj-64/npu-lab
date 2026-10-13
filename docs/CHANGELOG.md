@@ -3,6 +3,14 @@
 What is built, with the numbers measured when it was built. Moved verbatim from the old `ROADMAP.md` (Oct 2026); what is still open lives in
 [`../ROADMAP.md`](../ROADMAP.md) and the reasons for not building things in [`DECISIONS.md`](DECISIONS.md). Newest measurements first in section 0.
 
+## Fase 4 (13 oct 2026): capa de decisión local y guard del agente
+Detalle, tablas y condiciones en [`../bench/DECIDE.md`](../bench/DECIDE.md). Todas las cifras con GPU: [medido, GPU degradada].
+- **`src/decide.py`:** `decide(estado, preguntas, backend)` con probabilidades sobre opciones cerradas; backends `logprob` (modelo cargado, sin muestrear) y `embed` (MiniLM + regresión logística). Tareas `done`, `route`, `mixer`. Datos etiquetados: 210 estados de `done` (etiqueta = check real de la tarea), 203 de `route` y 201 de `mixer` (etiquetas mías), separación por tarea/estratificada. Regla de adopción fijada y commiteada antes de medir.
+- **Resultados (prueba):** `logprob` 4B: route 0.90, mixer 0.925, done AUC 0.91. `logprob` 2B: route 0.25 (siempre "None"; con letras A-D 0.525), mixer 0.45. `embed`: route 0.85, mixer 0.85, done AUC 0.71. Decisión: `logprob` 4B por defecto, `embed` en zona gris sin adoptar.
+- **Agente:** acción `RUN` (solo el comando configurado, tras confirmación) y guard de `DONE` (`agent_guard` off por defecto; `objective` y `model`), banco de 25 tareas (`bench/agent_tasks.py`, 5 con tests propios), `bench/agent_eval.py` con muestras, `RUN`, guard y trazas. Panel web probado en Chromium headless (8/8, `tests/e2e_agent_panel.mjs`) y `src/chat_cli.py` con el 4B real (8/8, `bench/cli_smoke.py`).
+- **4B real, 25 tareas, n=1 [exploración]:** 22/25 resueltas; `DONE` falso 2/25 = 0.08 [0.00, 0.20] (bootstrap por tarea). El guard objetivo cuesta un turno (3 de 3 tareas con tests resueltas tras `RUN`); el guard de modelo no recuperó las 2 tareas con `DONE` falso. τ=0.678 (sintético) no sirve con trazas reales.
+- Pruebas: `tests/test_agent_guard.py` y `tests/e2e_agent_panel.mjs`; `classify` del motor reescrito sobre `option_probs` sin cambio de comportamiento.
+
 ## Fase 1 (13 oct 2026): energía y eficiencia
 Detalle, método y tablas en [`../bench/ENERGY.md`](../bench/ENERGY.md) (`bench/energy.py`, 3 corridas por fila, APU por hwmon `amdgpu` + GPU por `nvidia-smi`; RAPL es solo root).
 - **Qwen3-1.7B, decode:** NPU-only 8.91 ± 0.22 tok/s, 32.7 W, 0.27 tok/J; Asistido 8.54 ± 0.10, 34.8 W, 0.25 tok/J (empate). **Prompt:** NPU-only 76.9 tok/s, 2.35 tok/J; Asistido 399 tok/s, 8.06 tok/J.

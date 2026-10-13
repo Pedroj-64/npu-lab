@@ -3,6 +3,13 @@
 Why things are built the way they are, and what was looked at and NOT built. Moved verbatim from the old `ROADMAP.md` (Oct 2026), plus the
 Phase 0 decisions at the top. Labels in the old text: measured = in `bench/RESULTS.md` / `bench/PERF.md`; estimate = extrapolated; proposal = does not exist.
 
+## Decisiones de la Fase 4 (13 oct 2026)
+- **Capa de decisión: `logprob` con el 4B por defecto** (sin VRAM extra, probabilidades de las opciones sin muestrear). `embed` no se adopta (empate en zona gris, IC solapados) pero queda como alternativa cuando solo hay un 2B cargado; el 2B no decide con palabras (sesgo hacia "None").
+- **Guard de `DONE` apagado por defecto** (`agent_guard`). El guard objetivo manda cuando hay check; el modelo es señal secundaria y se reporta como curva de τ, sin umbral recomendado (τ=0.678 se calibró con datos sintéticos y no vale con trazas reales; con 1-2 negativos no se puede recalibrar).
+- **Laya, NanoJev y Kev: no se descargan ni instalan.** Motivos [reportado por terceros, sin verificar]: Laya multilingüe necesita torch/transformers, contexto de 1024 tokens y sin ONNX int8 verificado del multilingüe; NanoJev solo muestra benchmarks de juegos con 8-10 episodios; Kev exige fusionar el LoRA, convertir a int8 y construir la cabeza "pointer". Jev (propietario, solo API) queda fuera por la regla de privacidad.
+- **El agente no es autónomo:** 22/25 con `DONE` falso 0.08 [0.00, 0.20] (n=1); sigue siendo un ayudante que pide confirmación en cada escritura y en `RUN`.
+- **Idioma de la documentación (decidido en un paso):** los informes de medición (`bench/*.md`) y los bloques nuevos de cada fase van en español, como pide el encargo; el README y el texto histórico movido del ROADMAP se quedan en inglés (documento público y registro literal). No se traduce el texto movido para no alterar lo que se midió con esas palabras.
+
 ## Decisiones de la Fase 0 (13 oct 2026)
 - **No se implementa `--fuse-proj`** (ni en decode ni en prefill). Datos: en decode ya están fusionadas qkv y gate|up; las demás matrices dependen de la salida anterior; el coste fijo total de las llamadas es como mucho ~11.9 ms por token y no es fusionable. En prefill el despacho es el 1-2 % del tiempo. Se reabre solo si cambia el motor (por ejemplo un kernel que acepte varias K). Evidencia: `bench/PERF.md` §8.3-§8.4.
 - **El motor sigue con un único contexto de 4 columnas y K común:** cambiar de contexto cuesta ~400 µs (medido), cambiar el buffer de instrucciones 1-5 µs.

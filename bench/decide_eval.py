@@ -61,7 +61,7 @@ else:
     eng = Q35.load_engine(a.model, gpu=True, gpu_share=0.0, vram_gb=a.vram_gb, max_ctx=12000) if "qwen35" in a.model else __import__("qwen_npu").Qwen(a.model)
     backend = decide.LogprobBackend(eng, limit=12000)
     ram_mb = 0.0
-    tag = "logprob_" + os.path.basename(a.model)
+    tag = "logprob_" + os.path.basename(a.model) + ("_letters" if decide.ROUTE_LETTERS else "")
 os.makedirs("bench/decide_results", exist_ok=True)
 out = open(f"bench/decide_results/{tag}.jsonl", "w")
 n = 0

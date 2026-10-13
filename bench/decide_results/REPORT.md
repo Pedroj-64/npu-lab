@@ -54,6 +54,12 @@ End to end on the 75 test states (NO = the task is not done): DONE accepted by t
 | 25 | 75 | 0.927 | 0.868 | 0.813 | 0/12 [0.00, 0.24] | 9/36 | 1262 |
 | 80 | 75 | 0.912 | 0.847 | 0.840 | 0/12 [0.00, 0.24] | 8/36 | 2894 |
 
+## logprob_qwen35_2b_letters  (extra RAM 0 MB)
+
+| task | n | accuracy [95 % CI] | Brier | ECE | latency p50 / p95 (s) |
+|---|---:|---:|---:|---:|---:|
+| route | 40 | 0.525 [0.37, 0.67] | 0.645 | 0.184 | 0.790 / 0.795 |
+
 ## logprob_qwen35_4b  (extra RAM 0 MB)
 
 | task | n | accuracy [95 % CI] | Brier | ECE | latency p50 / p95 (s) |

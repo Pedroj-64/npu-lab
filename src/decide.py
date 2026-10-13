@@ -18,10 +18,15 @@ SYSTEM_ROUTE = ("You route questions to a source. Do not answer them.\n"
                 "Docs: how to use a Linux command, package manager or installed tool. Example: 'how do I delete a folder with rm'.\n"
                 "Web: recent events, news, prices, versions, anything that changes over time. Example: 'who is the current champion'.\n"
                 "History: refers to what was said earlier in this conversation. Example: 'make that shorter'.")
+# Flag (off by default): NPU_LAB_ROUTE_LABELS=letters shows the router options to the model as A-D instead of None/Docs/Web/History. The 2B has a strong prior for the
+# word "None" and answers it for everything with the words (measured: bench/DECIDE.md); letters remove that prior. The options returned keep the data's names.
+ROUTE_LETTERS = os.environ.get("NPU_LAB_ROUTE_LABELS", "words") == "letters"
+SYSTEM_ROUTE_LETTERS = SYSTEM_ROUTE.replace("None:", "A:").replace("Docs:", "B:").replace("Web:", "C:").replace("History:", "D:")
 TASKS = {
     "done": dict(system=SYSTEM_DONE, options=["YES", "NO"], text="Does the evidence show that the task is completely and correctly done?"),
     # the labels the model sees are ONE token each (NONE/DOCS/HISTORY are split into pieces by the tokenizer and score badly); the options returned keep the data's names
-    "route": dict(system=SYSTEM_ROUTE, options=["NONE", "DOCS", "WEB", "HISTORY"], labels=["None", "Docs", "Web", "History"], text=None),
+    "route": dict(system=SYSTEM_ROUTE_LETTERS if ROUTE_LETTERS else SYSTEM_ROUTE, options=["NONE", "DOCS", "WEB", "HISTORY"],
+                  labels=["A", "B", "C", "D"] if ROUTE_LETTERS else ["None", "Docs", "Web", "History"], text=None),
     "mixer": dict(system=SYSTEM_MIXER, options=["fast", "medium", "slow"], text="Which model should answer this request?"),
 }
 for _t in TASKS.values():

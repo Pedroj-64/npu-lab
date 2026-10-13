@@ -12,7 +12,7 @@ so everything here is built from the low-level pieces.
   the model proposes ONE action per reply (read, list, edit, create, delete); reads run alone, anything that writes shows a preview and waits
   for your click (or y/N in the terminal); deletes go to a recoverable trash in `~/.local/share/npu-lab/trash/`. With the 4B, 94% of the calls were
   valid but only 3-4 of 5 test tasks were solved and a false "DONE" still happens, so it is a confirm-each-step helper, not an autonomous agent
-  (numbers in `ROADMAP.md` 4d). The web clicks and the terminal chat have not been tried yet with the real 4B.
+  (numbers in `docs/CHANGELOG.md`). Optional, off by default: `RUN` (runs only the test command you configure, `agent_test_command`, after your confirmation) and a `DONE` guard (`agent_guard`: `objective` or `model`) set through the `/rules` API. The web panel (headless browser, scripted model) and the terminal chat (real 4B) pass their end-to-end tests.
 - `bench/matmul_npu.py`: int16 matmul on the NPU vs numpy on the CPU (up to ~1.4 TOPS at 1024^3).
 - `src/minilm.py` + `src/npu_linear.py`: all-MiniLM-L6-v2 sentence embeddings in numpy,
   with every dense layer offloaded to the NPU. Embeddings match the CPU ones (cosine >= 0.996).

@@ -153,7 +153,7 @@ try:
             lines = [json.loads(x) for x in body.decode().splitlines() if x]
             comp = next((l["compacted"] for l in lines if "compacted" in l), None)
             check(f"a conversation past the threshold is compacted into notes ({len(comp['summary']) if comp else 0} chars, kept {comp['kept'] if comp else '-'} messages)",
-                  s == 200 and comp is not None and len(comp["summary"]) > 20 and comp["kept"] == 6 and lines[-1].get("done"))
+                  s == 200 and comp is not None and len(comp["summary"]) > 20 and comp["kept"] == 6 and any(l.get("done") is True for l in lines))        # the notes arrive AFTER the answer's done line (compaction runs after the answer)
         if has_gpu and os.path.exists(os.path.join(ROOT, "models/qwen35_2b/config.json")):
             check("qwen3.5 refused without the assisted profile", (call("POST", "/profile", {"profile": "npu_only"}), call("POST", "/mode", {"mode": "llm", "model": "qwen35m"}))[1][0] == 409)
             call("POST", "/profile", {"profile": "assisted"})
