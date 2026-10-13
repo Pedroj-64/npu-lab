@@ -5,6 +5,19 @@ NO se construyó (y por qué) en [`docs/DECISIONS.md`](docs/DECISIONS.md); medic
 Estado: `[ ]` pendiente, `[~]` a medias. Cada punto conserva su texto original (en inglés) con la forma de comprobarlo. Reglas de trabajo: medir antes y después
 (mínimo 3 corridas), todo cambio de comportamiento tras una bandera apagada por defecto, privacidad local (ver `docs/DECISIONS.md`, Principles).
 
+## 0. Regla de prioridad (usuario, 13 oct 2026): lo no hecho y lo más antiguo van primero
+Al elegir qué sigue se parte de lo que lleva más tiempo pendiente, no de lo más reciente. **Nota honesta:** el historial de git empieza el 12 oct, así que no sirve para medir antigüedad (todos los puntos aparecen ese día); el orden de abajo usa lo que sí se sabe: primero lo empezado y sin terminar (`[~]`), luego el orden original del documento, que es el del encargo. Cola actual (se actualiza al cerrar cada punto):
+1. `[~]` **`tests/eval_answers.py`**: escrito, **nunca ejecutado** (necesita servidor con LLM y la NPU sola). Lo más viejo sin hacer.
+2. `[~]` **Memoria**: mostrar la RAM/VRAM del modelo antes de cargarlo (Fase 3, punto 5) y el estado "cargando modelo, NPU ocupada".
+3. `[~]` **Costes fijos de las llamadas a la NPU** (Fase 2, lote C): empezado, falta el microbenchmark acotado.
+4. **Lotes de peticiones independientes** (`mv_i8_i8` NV=4 y resúmenes por lotes; Fase 3, punto 4): lleva en el backlog desde el inicio; no se escribe kernel sin tu OK.
+5. **KV int8 con escala por cabeza** (Fase 3, punto 1; dos entradas del backlog): solo cuando el KV limite la ventana del 4B.
+6. **Compactación: líneas fijadas, código fuera del resumen y memoria por recuperación** (Fase 5, lote 4).
+7. **Búsqueda híbrida y reranker de documentos**: el BM25 midió +0.038 recall@4 (por debajo del margen de +0.05, apagado); el reranker sigue sin medirse.
+8. **Bóveda de notas en solo lectura** (Fase 5, lote 3), tratada como texto no fiable.
+9. **Agente fiable** (sección 1): endurecer el guard con tests, errores que orienten al modelo.
+Cerrados o decididos que NO se hacen: int4 sin calibración (Fase 2, descartado), prefijo estable en disco (no compensa, `docs/DECISIONS.md`), fusión de lanzamientos de DeltaNet (techo 4.4 %).
+
 ## 1. Agente fiable (la mayor palanca de calidad hoy)
 Medido (Fase 4, 4B, 25 tareas, n=1 por tarea, exploración): 22/25 resueltas y `DONE` falso 2/25 = 0.08 [0.00, 0.20] (bootstrap por tarea); sigue siendo un ayudante que pide confirmación en cada escritura y en `RUN`. Hecho: `RUN`, guard de `DONE` tras bandera apagada (CHANGELOG, `bench/DECIDE.md`).
 - [ ] **Endurecer el guard objetivo sin tests** [propuesto]: los 2 `DONE` falsos están en tareas sin tests. Comprobar que lo que la instrucción nombra (`table`, `cur`) aparece en el diff y que los archivos tocados son coherentes con la instrucción. Check: `python bench/guard_offline.py` sobre las trazas debe atrapar las tareas 11 y 18 sin rechazar las 22 resueltas.

@@ -12,7 +12,7 @@ Criterios, banco v2 (1091 consultas) y resultados en [`../bench/FASE56.md`](../b
 ## Bloque 1 con GPU sana (13 oct 2026)
 Criterios y resultados en [`../bench/PROPUESTA_GPU_SANA.md`](../bench/PROPUESTA_GPU_SANA.md). [medido, GPU sana]
 - **Lote A repetido:** paso del 2B 136.0 -> 110.5 ms y del 4B 293.1 -> 232.3 ms; DeltaNet de la GPU 28.0 -> 4.9 ms (2B); la espera de la NPU es ahora el 80-84 % del paso. Fusionar lanzamientos de DeltaNet no merece la pena (techo 4.4 %). Detalle: `bench/FASE2.md`.
-- **4B con reparto:** 25 % +18 % y 50 % +60 % de velocidad con los mismos 0.11 tok/J, pero 5277 y 5755 MiB de pico (hueco libre 867 y 389 MiB): no cumplen el hueco de 1 GB.
+- **4B con reparto:** 25 % +18 % y 50 % +60 % de velocidad con los mismos 0.11 tok/J, pero 5277 y 5755 MiB de pico (hueco libre real ~580 y ~102 MiB, corregido el 13 oct: CUDA ve 5857 MiB, no 6144): no cumplen el hueco de 1 GB.
 - **Barrido 60-75 % del 2B:** hubo que compilar 15 kernels de NPU (80 s); 50 % 13.60, 60 % 15.47, 65 % 16.98, 70 % 17.63, 75 % 18.19 tok/s (+34 %) con tok/J ~0.30-0.31 y 4.07 GB de pico. Un texto de 5 cambia con cualquier reparto distinto de 0 (casi empate numérico).
 - **Fase 3, reuso del prefijo:** caliente en el mismo proceso relee 102 de 7270 tokens (19-23x más rápido, logits idénticos); el caché en disco solo acierta con el mismo prompt, no con una pregunta distinta.
 - **1.7B:** solo NPU ~13 % más eficiente que Asistido en decode (real, no ruido); los tok/J absolutos cambian ~15 % entre sesiones.

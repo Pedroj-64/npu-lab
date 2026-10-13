@@ -82,18 +82,18 @@ The NPU is the center of the project; GPU/CPU are optional helpers, never requir
   | Role | Model (folder) | Needs | Decode on a Ryzen 5 8645HS + RTX 3050 6 GB |
   |---|---|---|---|
   | fast | Qwen3.5-0.8B (`models/qwen35_08b`) | Assisted | ~15 tok/s |
-  | medium | Qwen3.5-2B (`models/qwen35_2b`) | Assisted | ~9 tok/s; **~13.8 tok/s with a 50% GPU share** |
-  | slow, high quality | Qwen3.5-4B (`models/qwen35_4b`) | Assisted | ~4.2 tok/s |
+  | medium | Qwen3.5-2B (`models/qwen35_2b`) | Assisted | ~9.3 tok/s at 0%; **~14 tok/s at the default 50% GPU share**; ~18 tok/s at 75% (opt-in "max speed": ~60 W, the CPU runs at 90-94 °C) |
+  | slow, high quality | Qwen3.5-4B (`models/qwen35_4b`) | Assisted | ~4.2 tok/s at the default 0% (5.0 at 25%, opt-in: it needs the GPU-memory margin lowered to ~550 MiB) |
   | NPU only | Qwen3-1.7B (`models/qwen3`), Qwen3-0.6B (`models/qwen3s`) | nothing | ~10 / ~18-20 tok/s at short context, 4k window (see below) |
 
   One model is loaded at a time (Unload, then Load). **Profiles:** *NPU only* never touches the GPU (Qwen3 models, 4096 tokens of
   context, prompts read by the NPU at ~90-220 tok/s that fall as the prompt grows, because attention runs on one CPU thread; decode of the 0.6B goes from ~18-20 tok/s
   at short context to ~7 at 3500 tokens; numbers in [`bench/PERF.md`](bench/PERF.md)). *Assisted* lets the GPU read prompts (1000-1800 tok/s), keep the KV cache / DeltaNet
   state and run attention, which gives **long context** (default window 80k tokens, up to 262k; Qwen3.5-2B reads 100k tokens in ~90 s and
-  keeps ~8 tok/s), and optionally compute a share (0/25/50%) of every weight matrix next to the NPU. Limits are set in the Setup tab:
+  keeps ~8 tok/s), and optionally compute a share (0/25/50/75%, per model, see below) of every weight matrix next to the NPU. Limits are set in the Setup tab:
   GPU memory the model may use (default 4 GB), context window, when to compact the conversation (the model summarises old turns), GPU share.
   Kernels for a model: `python src/qwen35_npu.py --model DIR --shapes [--share 0.5]` lists them and
-  `python scripts/build_matvec.py --shared4 ...` builds them (the System check prints the exact command). `src/qwen_npu.py` is the Qwen3
+  `python scripts/build_matvec.py --shared4 ...` builds them (the System check and the Settings page print the exact command; a share whose kernels are missing is greyed out). `src/qwen_npu.py` is the Qwen3
   (dense) engine, `src/qwen35_npu.py` the hybrid Qwen3.5 one (Gated DeltaNet on the GPU).
 - **Semantic file search**: `python src/search.py index` then `python src/search.py search "query"`.
   Embeddings run on the NPU. What may be read is controlled by `~/.config/npu-lab/rules.json`
@@ -142,6 +142,8 @@ The NPU is the center of the project; GPU/CPU are optional helpers, never requir
 8. Optional: local documentation index (`python src/docs.py --device gpu build`, after `tldr --update`).
 
 ## Status
+**Known issue (open):** on the tested laptop the NVIDIA GPU ran at ~2.5 TFLOPS (state P5, memory at 780 MHz) after a boot WITHOUT the charger and at ~15 TFLOPS (P0) after boots WITH it (3 boots, a correlation; root cause not found, see `ROADMAP.md`). Boot with the charger plugged in and check with `sh bench/block1_preflight.sh` before trusting any GPU number.
+
 Usable day to day on the tested machine (Ryzen 5 8645HS + RTX 3050 6 GB, Linux): chat with five models, long context (80k tokens by default; with the 4B
 the 6 GB card holds about 22k tokens, the GPU budget is now capped automatically so a value that is too high no longer runs out of memory), documents,
 local docs, web search, optional cloud assist, agent mode with confirmation. Known limits: Linux only, XDNA1 only, the Assisted profile needs an NVIDIA GPU with CUDA,

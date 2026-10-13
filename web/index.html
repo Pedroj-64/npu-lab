@@ -84,7 +84,7 @@
       It needs NPU kernels built for the share (the System check tells you the command).
       <span id="gsharenote" style="color:var(--warn,#c60)"></span>
       Defaults: 2B 50%, everything else 0%. 2B at 75% (max speed): +34% decode speed over 50% (18.2 vs 13.6 tok/s), but the whole machine draws ~60 W instead of ~44 W and tokens/J stays ~0.30; measured, bench/ENERGY.md.
-      4B at 25%: +18% speed, but the GPU memory peak is 5277 MiB of 6144 (867 MiB left for the desktop; 0% leaves 1087 MiB). Shares are per model; the list only offers those with a measured fit.</div>
+      4B at 25%: +18% speed, but the GPU memory peak is 5277 MiB and CUDA can use 5857 MiB of the 6144 (about 580 MiB left for the desktop; 0% leaves about 800 MiB), so with the default 700 MiB margin the 4B only loads at 0% unless you lower the margin. Shares are per model; the list only offers those with a measured fit.</div>
     <div class="dim" id="profnote" style="margin-top:8px"></div></div>
 </section>
 

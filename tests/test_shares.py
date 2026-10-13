@@ -11,9 +11,11 @@ assert serve.share_of("qwen35m", {"gpu_share": {"qwen35m": 0.75}}) == 0.75 and s
 
 # VRAM margin (free memory taken from nvidia-smi at load; here injected)
 v = serve.vram_refusal
-assert v("qwen35l", 0.0, 700, 6116) is None and v("qwen35l", 0.25, 700, 6116) is None, "4B at 0 % and 25 % leave >= 700 MiB"
-m = v("qwen35l", 0.5, 700, 6116); assert m and "Pick a lower GPU share" in m and "389" not in m and "361" in m, m
-assert v("qwen35l", 0.25, 1024, 6116), "a 1 GB margin refuses the 4B at 25 % (839 MiB left)"
+# CUDA sees 5857 MiB of the 6144; nvidia-smi reports ~5830 MiB free with the desktop open
+assert v("qwen35l", 0.0, 700, 5830) is None, "4B at 0 % leaves ~770 MiB"
+m = v("qwen35l", 0.25, 700, 5830); assert m and "Pick a lower GPU share" in m and "553" in m, m
+assert v("qwen35l", 0.25, 500, 5830) is None, "lowering the margin allows the 4B at 25 %"
+assert v("qwen35l", 0.5, 500, 5830), "the 4B at 50 % never fits"
 assert v("qwen35l", 0.0, 700, 5000), "another program already holds the GPU memory"
 assert v("qwen35l", 0.0, 700, None) is None and v("qwen35s", 0.0, 700, 100) is None, "no nvidia-smi, or no measured peak: only the check after loading applies"
 

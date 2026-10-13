@@ -57,11 +57,13 @@ Notas: el 4B solo se midió con reparto 0 % (con la tarjeta de 5.72 GiB los peso
 ## Segunda sesión sana (bloque 1, 13 oct 13:22-13:44) [medido, n = 3 corridas por fila; crudos en `bench/energy_runs.jsonl`]
 **Qwen3.5-4B con reparto de GPU, `--vram-gb 5.0`** (el 0 % viene de la primera sesión sana: 4.23 ± 0.20 tok/s, 0.11 ± 0.02 tok/J, pico 5057 MiB):
 
-| reparto | decode tok/s | total W (GPU W) | tok/J | prefill 4096 tok/s | VRAM pico (nvidia-smi) | hueco libre de 6144 MiB |
+| reparto | decode tok/s | total W (GPU W) | tok/J | prefill 4096 tok/s | VRAM pico (nvidia-smi) | hueco libre contra 6144 MiB (sobrestimado, ver corrección) |
 |---|---:|---:|---:|---:|---:|---:|
 | 0 % | 4.23 ± 0.20 | 37.4 (12.0) | 0.11 ± 0.02 | 781.7 | 5057 MiB | 1087 MiB (cumple >= 1024) |
 | 25 % | **4.99 ± 0.00** (+18 %) | 46.2 (17.7) | 0.11 ± 0.00 | 780.4 | **5277 MiB** | 867 MiB (**no cumple**) |
 | 50 % | **6.76 ± 0.07** (+60 %) | 63.2 (36.9) | 0.11 ± 0.00 | 782.6 | **5755 MiB** | 389 MiB (**no cumple**; el asignador de CUDA registró un OOM recuperado al pedir 608 MiB con 548 MiB libres) |
+
+**Corrección [13 oct 15:50, medida con el rechazo real de la CLI y con el mensaje de OOM del asignador de CUDA]:** la columna anterior restaba el pico de los 6144 MiB de la tarjeta, pero CUDA solo puede usar **5857 MiB** (el asignador de CUDA lo dice: `total: 6141509632`) y `nvidia-smi` reporta 5830 MiB libres con el escritorio abierto. El hueco real para el escritorio es **5857 − pico = ~800 MiB (0 %), ~580 MiB (25 %) y ~102 MiB (50 %)**, unos 287 MiB menos de lo que decía la tabla (1087 / 867 / 389). Los picos medidos no cambian; cambia lo que significan para el margen.
 
 Lectura: el reparto sube la velocidad del 4B (+18 % y +60 %) pero **no mejora tokens/J** (la GPU gasta lo que ahorra) y **rompe el hueco de 1 GB para el escritorio** desde el 25 %. Por la regla escrita (pico <= 5120 MiB) el 4B se queda en 0 % con 5.0 GB; los repartos 0.40 y 0.30 del plan no se probaron porque el pico crece con el reparto (+220 MiB del 0 al 25 %, +478 más hasta el 50 %) y ya el 25 % se pasa [inferido de 3 puntos, no medido]. Decisión pendiente tuya: 25 % (+18 %, 867 MiB libres) o 0 %. El prefill no cambia con el reparto (782 tok/s), igual que en el 2B.
 
