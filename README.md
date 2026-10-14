@@ -5,6 +5,11 @@ on Linux: custom kernels with [mlir-aie / IRON](https://github.com/Xilinx/mlir-a
 run through XRT and `pyxrt`. No vendor LLM stack supports this generation on Linux,
 so everything here is built from the low-level pieces.
 
+Spanish: [`README.es.md`](README.es.md).
+
+## Direction
+The first-generation NPU (XDNA1, Ryzen 7040/8040) is slower than a GPU, but it is efficient and always available. npu-lab is turning into a small-model assistant for it: private semantic search, a project map you can query cheaply, background help for developers and, later, a desktop client and a phone bridge. Plan, tasks and acceptance checks: [`docs/PLAN.md`](docs/PLAN.md). Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Contributing and rules: [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/WORKING_RULES.md`](docs/WORKING_RULES.md). Outside work on this hardware is tracked in [`docs/RESEARCH_LOG.md`](docs/RESEARCH_LOG.md). If you own an XDNA1 machine, measurements and reports are the most useful contribution.
+
 ## What works
 - **Local LLM chat with the NPU generating every token** (Qwen3 / Qwen3.5, 0.6B to 4B), optional GPU assistance for long context, documents,
   local docs and web search: see Quick start and Modes below.

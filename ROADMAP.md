@@ -1,5 +1,7 @@
 # Roadmap
 
+> **Product direction (14 Oct 2026):** the always-on assistant plan with phases, tasks and acceptance checks lives in [`docs/PLAN.md`](docs/PLAN.md) ([ES](docs/PLAN.es.md)); working rules in [`docs/WORKING_RULES.md`](docs/WORKING_RULES.md). This file keeps the technical backlog by priority and the oldest-first rule below.
+
 Solo lo pendiente, por prioridad (impacto esperado / esfuerzo). Lo hecho, con sus cifras, está en [`docs/CHANGELOG.md`](docs/CHANGELOG.md); lo que se miró y
 NO se construyó (y por qué) en [`docs/DECISIONS.md`](docs/DECISIONS.md); mediciones de rendimiento en [`bench/PERF.md`](bench/PERF.md).
 Estado: `[ ]` pendiente, `[~]` a medias. Cada punto conserva su texto original (en inglés) con la forma de comprobarlo. Reglas de trabajo: medir antes y después
@@ -125,6 +127,12 @@ Goal: answer easy questions with the fast model and send hard ones (long code ed
 - [ ] Windows: the launcher and UI should work; NPU backends there need AMD's Ryzen AI stack, which is untested here.
 - [ ] XDNA2 (Ryzen AI 300) report: the kernels target `npu1`; contributors with that hardware are welcome (see `CONTRIBUTING.md`).
 - [ ] Package the launcher binary (releases) and a one-command setup check.
+
+### Apilado de memoria para el agente del editor (VS Code) [pendiente, anotado 13 oct]
+Problema visto en el puente `/v1` con herramientas: el modelo **pregunta o relee** (por ejemplo `.gitignore` en bucle) en vez de usar lo que ya sabe, y manda la carpeta del workspace, los archivos ya creados y el contenido ya leído como si fueran nuevos. Cada turno del editor llega sin estado y el servidor recorta lo viejo (36 000 caracteres), así que lo aprendido se pierde.
+- **Idea:** una pila de hechos por conversación, en el servidor, que se inyecta corta en el prompt de sistema de cada turno: ruta del workspace (sacada del contexto del editor), archivos creados/leídos con su resumen de una línea, decisiones ya tomadas (framework, nombres) y las llamadas ya hechas, para que no se repitan. Lo viejo se resume y se apila; lo reciente queda literal.
+- **Medir antes de adoptar:** bucles de lectura por 100 turnos (hoy se corta a la fuerza en 3 lecturas), llamadas repetidas, y preguntas innecesarias al usuario; con el 2B y el 4B, y el contexto que de verdad cabe (11 636 tokens con el 4B, 16 000 con el 2B).
+- **Otras mejoras de herramientas anotadas:** varias llamadas por turno (hoy una), nombres de herramientas por tipo de sesión del editor (chat agente y estilo CLI ya mapeados), reintento de llamadas mal formadas (hecho: una vez), y límite del workspace aplicado también en el servidor (hoy lo aplica el editor).
 
 ## 7. Fases de puesta a punto
 - [~] **Phase 5, set defaults**: the fast / medium / slow selector is done; still open: router classifier on by default (Qwen3.5 as judge, re-measure) and the reranker on the GPU.

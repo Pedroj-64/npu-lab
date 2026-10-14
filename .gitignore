@@ -7,3 +7,6 @@ models/
 launcher/target/
 bench/agent_traces/
 bench/real_questions*.jsonl
+
+# raw intermediate results (kept locally, cited by reports)
+bench/.*
