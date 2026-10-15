@@ -11,7 +11,7 @@ Spanish: [`README.es.md`](README.es.md).
 The first-generation NPU (XDNA1, Ryzen 7040/8040) is slower than a GPU, but it is efficient and always available. npu-lab is turning into a small-model assistant for it: private semantic search, a project map you can query cheaply, background help for developers and, later, a desktop client and a phone bridge. Plan, tasks and acceptance checks: [`docs/PLAN.md`](docs/PLAN.md). Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Contributing and rules: [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/WORKING_RULES.md`](docs/WORKING_RULES.md). Outside work on this hardware is tracked in [`docs/RESEARCH_LOG.md`](docs/RESEARCH_LOG.md). If you own an XDNA1 machine, measurements and reports are the most useful contribution.
 
 ## What works
-- **Local LLM chat with the NPU generating every token** (Qwen3 / Qwen3.5, 0.6B to 4B), optional GPU assistance for long context, documents,
+- **Local LLM chat with the NPU generating every token** (Qwen3, 0.6B and 1.7B), optional GPU assistance for long context, documents,
   local docs and web search: see Quick start and Modes below.
 - **Agent mode** (project folder + "agent mode" in the Chat tab, or the terminal chat `python src/chat_cli.py --model qwen35l --project DIR --agent`):
   the model proposes ONE action per reply (read, list, edit, create, delete); reads run alone, anything that writes shows a preview and waits
@@ -76,7 +76,7 @@ Press Ctrl+C in the terminal to stop it. For VS Code Copilot see [Use the local 
 Security: the server listens on `127.0.0.1` only and every API call needs a random token; the link the launcher
 prints carries a **one-time code** (it works once, then it is useless); foreign `Host`/`Origin` headers are refused;
 the API never accepts file paths for models and only lets you read folders inside your home.
-`python tests/test_server.py` checks all of this plus real NPU and GPU round trips (loads each profile, a Qwen3.5 model, compaction);
+`python tests/test_server.py` checks all of this plus real NPU and GPU round trips (loads each profile, compaction);
 `python tests/eval_routing.py` checks the routing rules offline.
 
 ## Use the local models from VS Code (Copilot) or any OpenAI-style client
@@ -90,13 +90,13 @@ for your own machine**.
    NPU_LAB_PORT=8765 ./launcher/target/release/npu          # add --no-browser if you will not use the web page
    ```
    (A shorter or missing `NPU_LAB_TOKEN` is ignored and a random token is used, which you could not give to the editor.)
-2. Load a model: in the web page (Chat tab, pick the profile, **Load**), or from the terminal with `curl -H "Authorization: Bearer $NPU_LAB_TOKEN" -d '{"mode":"llm","model":"qwen35m"}' http://127.0.0.1:8765/mode`
-   (Qwen3.5 models need the Assisted profile first: `-d '{"profile":"assisted"}' .../profile`). One model at a time; the editor talks to whichever is loaded.
+2. Load a model: in the web page (Chat tab, pick the profile, **Load**), or from the terminal with `curl -H "Authorization: Bearer $NPU_LAB_TOKEN" -d '{"mode":"llm","model":"qwen3"}' http://127.0.0.1:8765/mode`
+   (the default profile is NPU only; `-d '{"profile":"assisted"}' .../profile` lets the GPU help). One model at a time; the editor talks to whichever is loaded.
 3. In VS Code add the model to `settings.json` (adjust the numbers to the context window shown in the Chat tab):
    ```json
    "github.copilot.chat.customOAIModels": {
-     "qwen35m": {
-       "name": "Qwen3.5 2B (NPU+GPU, local)",
+     "qwen3": {
+       "name": "Qwen3 1.7B (NPU, local)",
        "url": "http://127.0.0.1:8765/v1/chat/completions",
        "toolCalling": false,
        "vision": false,
@@ -120,25 +120,20 @@ page. Close one before opening the other (one program at a time on the NPU/GPU).
 
 ## Modes
 The NPU is the center of the project; GPU/CPU are optional helpers, never required.
-- **LLM chat**: the NPU generates every token (int8 weights, one shared 4-column kernel); all models are Qwen3 / Qwen3.5 (Apache-2.0),
+- **LLM chat**: the NPU generates every token (int8 weights, one shared 4-column kernel); all models are Qwen3 (Apache-2.0),
   downloaded separately into `models/` (see the table). The assistant answers in Spanish by default.
 
   | Role | Model (folder) | Needs | Decode on a Ryzen 5 8645HS + RTX 3050 6 GB |
   |---|---|---|---|
-  | fast | Qwen3.5-0.8B (`models/qwen35_08b`) | Assisted | ~15 tok/s |
-  | medium | Qwen3.5-2B (`models/qwen35_2b`) | Assisted | ~9.3 tok/s at 0%; **~14 tok/s at the default 50% GPU share**; ~18 tok/s at 75% (opt-in "max speed": ~60 W, the CPU runs at 90-94 °C) |
-  | slow, high quality | Qwen3.5-4B (`models/qwen35_4b`) | Assisted | ~4.2 tok/s at the default 0% (5.0 at 25%, opt-in: it needs the GPU-memory margin lowered to ~550 MiB) |
-  | NPU only | Qwen3-1.7B (`models/qwen3`), Qwen3-0.6B (`models/qwen3s`) | nothing | ~10 / ~18-20 tok/s at short context, 4k window (see below) |
+  | medium | Qwen3-1.7B (`models/qwen3`) | nothing | ~9-10 tok/s at short context, 4k window (see below) |
+  | fast | Qwen3-0.6B (`models/qwen3s`) | nothing | ~18-20 tok/s at short context, 4k window (see below) |
 
   One model is loaded at a time (Unload, then Load). **Profiles:** *NPU only* never touches the GPU (Qwen3 models, 4096 tokens of
   context, prompts read by the NPU at ~90-220 tok/s that fall as the prompt grows, because attention runs on one CPU thread; decode of the 0.6B goes from ~18-20 tok/s
-  at short context to ~7 at 3500 tokens; numbers in [`bench/PERF.md`](bench/PERF.md)). *Assisted* lets the GPU read prompts (1000-1800 tok/s), keep the KV cache / DeltaNet
-  state and run attention, which gives **long context** (default window 80k tokens, up to 262k; Qwen3.5-2B reads 100k tokens in ~90 s and
-  keeps ~8 tok/s), and optionally compute a share (0/25/50/75%, per model, see below) of every weight matrix next to the NPU. Limits are set in the Setup tab:
-  GPU memory the model may use (default 4 GB), context window, when to compact the conversation (the model summarises old turns), GPU share.
-  Kernels for a model: `python src/qwen35_npu.py --model DIR --shapes [--share 0.5]` lists them and
-  `python scripts/build_matvec.py --shared4 ...` builds them (the System check and the Settings page print the exact command; a share whose kernels are missing is greyed out). `src/qwen_npu.py` is the Qwen3
-  (dense) engine, `src/qwen35_npu.py` the hybrid Qwen3.5 one (Gated DeltaNet on the GPU).
+  at short context to ~7 at 3500 tokens; numbers in [`bench/PERF.md`](bench/PERF.md)). *Assisted* lets the GPU read prompts (1000-1800 tok/s), keep the KV cache and run attention, which gives **long context** (default window 80k tokens, up to 262k). Limits are set in the Setup tab:
+  GPU memory the model may use (default 4 GB), context window, and when to compact the conversation (the model summarises old turns).
+  Kernels for a model: `python src/qwen_npu.py --model DIR --shapes` lists them and `python scripts/build_matvec.py --shared4 ...` builds them (the System check prints the exact command).
+  `src/qwen_npu.py` is the engine (dense Qwen-style decoder). The hybrid Qwen3.5 models were removed on 2026-10-15 because they need the GPU for every token; see [`docs/DECISIONS.md`](docs/DECISIONS.md).
 - **Semantic file search**: `python src/search.py index` then `python src/search.py search "query"`.
   Embeddings run on the NPU. What may be read is controlled by `~/.config/npu-lab/rules.json`
   (allowed roots/extensions, denied folders and file names, secret-looking chunks are skipped);
@@ -155,7 +150,7 @@ The NPU is the center of the project; GPU/CPU are optional helpers, never requir
 4. Python venv with the toolchain:
    `uv venv .venv && uv pip install mlir_aie llvm-aie numpy scipy tokenizers safetensors -f https://github.com/Xilinx/mlir-aie/releases/expanded_assets/v1.4.4 -f https://github.com/Xilinx/llvm-aie/releases/expanded_assets/nightly`
    and link the system `pyxrt` into it (`.pth` file pointing at the XRT python dir). For the Assisted profile also install PyTorch with CUDA
-   (`uv pip install torch`) and, for the Qwen3.5 correctness check only, `transformers`. Documents: `sudo pacman -S poppler` (PDF text) and
+   (`uv pip install torch`). Documents: `sudo pacman -S poppler` (PDF text) and
    optionally `tesseract tesseract-data-spa tesseract-data-eng` (OCR of scans and images).
 5. Clone mlir-aie into `third_party/` and build the `whole_array` matmul kernels
    (see the reproduce section in `bench/RESULTS.md`).
@@ -163,10 +158,7 @@ The NPU is the center of the project; GPU/CPU are optional helpers, never requir
    ```
    python - <<'PY'
    from huggingface_hub import snapshot_download
-   for repo, d in [("Qwen/Qwen3.5-2B", "models/qwen35_2b"),      # medium (Assisted)
-                   ("Qwen/Qwen3.5-0.8B", "models/qwen35_08b"),   # fast (Assisted)
-                   ("Qwen/Qwen3.5-4B", "models/qwen35_4b"),      # slow, high quality (Assisted)
-                   ("Qwen/Qwen3-1.7B", "models/qwen3"),          # NPU only
+   for repo, d in [("Qwen/Qwen3-1.7B", "models/qwen3"),          # NPU only
                    ("Qwen/Qwen3-0.6B", "models/qwen3s"),         # NPU only, fast
                    ("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", "models/multi")]:
        snapshot_download(repo, local_dir=d, allow_patterns=["*.json", "*.safetensors", "merges.txt", "vocab.json", "*.jinja"])
@@ -201,6 +193,6 @@ License: MIT.
 
 ## Credits
 `src/kernels/matvec.py` is adapted from the [mlir-aie](https://github.com/Xilinx/mlir-aie) matrix_vector example
-(Apache-2.0 with LLVM exception; original header kept). Models: Qwen3 and Qwen3.5 (Qwen team, Apache-2.0), paraphrase-multilingual-MiniLM-L12-v2 and all-MiniLM-L6-v2 (sentence-transformers) are downloaded separately and not redistributed here.
+(Apache-2.0 with LLVM exception; original header kept). Models: Qwen3 (Qwen team, Apache-2.0), paraphrase-multilingual-MiniLM-L12-v2 and all-MiniLM-L6-v2 (sentence-transformers) are downloaded separately and not redistributed here.
 
 The Gated DeltaNet chunked scan in `src/gpu_qwen35.py` is adapted from Hugging Face transformers (`modeling_qwen3_5.py`, Apache-2.0).

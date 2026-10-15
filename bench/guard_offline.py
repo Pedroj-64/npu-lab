@@ -5,7 +5,7 @@ For each run that ended with an accepted DONE it asks: would the guard have refu
     NPU/GPU free: it loads the model) and cached in bench/agent_traces/guard_probs.jsonl; the report never loads a model.
 The statistical unit is the TASK: confidence intervals are a bootstrap over tasks. n = 1 sample per task is exploration, not a conclusion.
 usage: .venv/bin/python bench/guard_offline.py [--traces GLOB] [--calibrate]            report (CPU only; works with partial traces)
-       .venv/bin/python bench/guard_offline.py --score --model models/qwen35_4b          fill the probability cache for runs that have none (NPU+GPU: run alone; resumable)
+       .venv/bin/python bench/guard_offline.py --score --model models/qwen3          fill the probability cache for runs that have none (NPU+GPU: run alone; resumable)
 --calibrate: tau chosen leave-one-task-out on these real traces (smallest tau with no false accept among the OTHER tasks' wrong DONEs) instead of the fixed tau of the synthetic data."""
 import argparse, glob, json, os, re, sys
 import numpy as np
@@ -17,7 +17,7 @@ import decide, agent_tasks as T
 ap = argparse.ArgumentParser()
 ap.add_argument("--traces", default=os.path.join(ROOT, "bench", "agent_traces", "*_off_*.jsonl"), help="glob of trace files to read (default: the guard-off runs)")
 ap.add_argument("--score", action="store_true")
-ap.add_argument("--model", default="models/qwen35_4b")
+ap.add_argument("--model", default="models/qwen3")
 ap.add_argument("--calibrate", action="store_true")
 ap.add_argument("--taus", default="0.30:0.90:0.05")
 ap.add_argument("--boot", type=int, default=2000)
@@ -81,14 +81,14 @@ def cache():
 
 
 def score():
-    import qwen35_npu as Q35
+    import qwen_npu as Q35
     runs = [r for r in load_runs() if replay(r)["accepted"]]
     have = cache()
     todo = [r for r in runs if r["key"] not in have]
     print(f"{len(runs)} runs with an accepted DONE, {len(have)} already scored, {len(todo)} to do")
     if not todo:
         return
-    eng = Q35.load_engine(a.model, gpu=True, gpu_share=0.0, vram_gb=4.5, max_ctx=12000)
+    eng = Q35.Qwen(a.model, gpu=True, vram_gb=4.5, max_ctx=12000)
     be = decide.LogprobBackend(eng, limit=12000)
     with open(CACHE, "a") as f:
         for r in todo:

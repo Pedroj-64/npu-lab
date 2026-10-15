@@ -1,6 +1,6 @@
 """Terminal chat for the local models. Starts its own server (so close the web launcher first: one program at a time on the NPU/GPU), loads a model and talks to
 the same API as the web page. With a project folder and /agent on, the model proposes one action per reply: reads run alone, anything that writes asks y/N first.
-usage: python src/chat_cli.py [--model qwen35l] [--project ~/code/app] [--agent] [--tokens 600]
+usage: python src/chat_cli.py [--model qwen3] [--assisted] [--project ~/code/app] [--agent] [--tokens 600]
        python src/chat_cli.py --check        offline self-check of the helpers (no model, no server)
 In the chat: /help /new /project DIR /agent on|off /model NAME /quit   (Ctrl+C stops an answer; Ctrl+D leaves)"""
 import http.client, json, os, re, subprocess, sys, tempfile, threading, time
@@ -184,9 +184,9 @@ class Chat:
 def main():
     srv = Server()
     try:
-        srv.call("/profile", {"profile": "assisted"})
+        srv.call("/profile", {"profile": "assisted" if "--assisted" in sys.argv else "npu_only"})
         chat = Chat(srv, arg("--tokens", 600))
-        if not chat.load(arg("--model", "qwen35l")): return 1
+        if not chat.load(arg("--model", "qwen3")): return 1
         if "--project" in sys.argv: chat.command("/project " + arg("--project", ""))
         if "--agent" in sys.argv: chat.command("/agent on")
         print(bold("npu-lab chat") + dim("  /help for commands, Ctrl+C stops an answer, Ctrl+D leaves"))

@@ -1,6 +1,6 @@
 """Run one decision backend over the labelled data and store the probabilities per example (metrics are computed by bench/decide_report.py).
 usage: .venv/bin/python bench/decide_eval.py --backend embed [--tasks done,route,mixer]                      (CPU only, ~1 min)
-       .venv/bin/python bench/decide_eval.py --backend logprob --model models/qwen35_2b [--tasks ...]           (NPU+GPU: run alone)
+       .venv/bin/python bench/decide_eval.py --backend logprob --model models/qwen3 [--tasks ...]           (NPU+GPU: run alone)
 Splits evaluated: val and test (logprob is never trained; embed is fit on train only). `done` is also run on the test split with its evidence padded with
 --pad extra lines of irrelevant log output (default 0,25,80) to see how accuracy moves with the length of the context.
 Output: bench/decide_results/<backend>[_<model>].jsonl, one line per decision: id, task, split, pad, label, probs, seconds, state chars."""
@@ -13,7 +13,7 @@ import decide
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--backend", required=True, choices=["logprob", "embed"])
-ap.add_argument("--model", default="models/qwen35_2b")
+ap.add_argument("--model", default="models/qwen3")
 ap.add_argument("--tasks", default="done,route,mixer")
 ap.add_argument("--pad", default="0,25,80")
 ap.add_argument("--vram-gb", type=float, default=4.5)
@@ -57,8 +57,8 @@ if a.backend == "embed":
     ram_mb = rss() - m0
     tag = "embed"
 else:
-    import qwen35_npu as Q35
-    eng = Q35.load_engine(a.model, gpu=True, gpu_share=0.0, vram_gb=a.vram_gb, max_ctx=12000) if "qwen35" in a.model else __import__("qwen_npu").Qwen(a.model)
+    import qwen_npu as Q35
+    eng = Q35.Qwen(a.model, gpu=True, vram_gb=a.vram_gb, max_ctx=12000) 
     backend = decide.LogprobBackend(eng, limit=12000)
     ram_mb = 0.0
     tag = "logprob_" + os.path.basename(a.model) + ("_letters" if decide.ROUTE_LETTERS else "")

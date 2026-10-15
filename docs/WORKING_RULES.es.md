@@ -15,10 +15,10 @@ Un asistente local que corre modelos de lenguaje pequeños en la **NPU AMD XDNA1
 | Área | Archivos |
 |---|---|
 | Servidor, API, puente compatible con OpenAI | `src/serve.py` |
-| Motores | `src/qwen_npu.py` (Qwen3, solo NPU), `src/qwen35_npu.py` + `src/gpu_qwen35.py` (Qwen3.5, asistido) |
+| Motores | `src/qwen_npu.py` (Qwen3, solo NPU), `src/gpu_qwen.py` (ayuda opcional de la GPU) |
 | Búsqueda y documentos | `src/search.py`, `src/documents.py`, `src/docs.py`, `src/hybrid.py` (apagado), `src/gate.py` (apagado), `src/web.py` |
 | Enrutado y decisiones | `src/router.py`, `src/decide.py` |
-| Contexto | `src/statecache.py`, `src/pins.py`, `src/repomap.py`, `src/facts.py`, `src/chats.py` |
+| Contexto | `src/pins.py`, `src/repomap.py`, `src/facts.py`, `src/chats.py` |
 | Agente | `src/agent.py`, `src/project.py` |
 | Interfaz | `web/index.html` (JS puro), `launcher/` (Rust) |
 | Mediciones | `bench/` (scripts), `bench/*.md` (informes), `bench/history.jsonl` (registro continuo) |

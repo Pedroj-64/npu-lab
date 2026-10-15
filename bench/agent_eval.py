@@ -3,7 +3,7 @@ tool calling): READ / LIST / DELETE / DONE, or SEARCH/REPLACE blocks to edit or 
 project and feeds the result back, for at most --steps turns. Two numbers per run: how many replies were a valid action that ran ("valid calls"),
 and how many tasks end with a project that passes a code/filesystem check ("solved").
 usage: python bench/agent_eval.py --check              scripted perfect agent through the same harness, all 25 tasks of bench/agent_tasks.py (no model, ~15 s)
-       python bench/agent_eval.py --model qwen35l [--tasks 1-25] [--samples 3] [--steps 8] [--tokens 350] [--deadline 7200] [--lang en|es]
+       python bench/agent_eval.py --model qwen3 [--tasks 1-25] [--samples 3] [--steps 8] [--tokens 350] [--deadline 7200] [--lang en|es]
                                   [--run] [--guard off|objective|model] [--tau 0.5]     (NPU+GPU: run alone; --run gives the agent RUN on the "shop" tasks;
                                   every task run is appended to bench/agent_traces/*.jsonl: replies, results and final files, for later analysis)"""
 import http.client, json, os, re, shutil, subprocess, sys, tempfile, time
@@ -156,7 +156,7 @@ def parse_ids(spec):
 def run():
     import statistics as st, agent_tasks as T
     T.fill_original_refs()
-    model, steps, tokens, deadline = arg("--model", "qwen35l"), arg("--steps", 8), arg("--tokens", 350), arg("--deadline", 7200)
+    model, steps, tokens, deadline = arg("--model", "qwen3"), arg("--steps", 8), arg("--tokens", 350), arg("--deadline", 7200)
     tids, samples, lang, guard, tau, use_run = parse_ids(arg("--tasks", "1-25")), arg("--samples", 3), arg("--lang", "en"), arg("--guard", "off"), arg("--tau", 0.5), "--run" in sys.argv
     tmp = tempfile.mkdtemp(); Tk = "g" * 43; t0 = time.time()
     p = subprocess.Popen([sys.executable, "-u", os.path.join(ROOT, "src", "serve.py")], cwd=ROOT, stdout=subprocess.PIPE, text=True,

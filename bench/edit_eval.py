@@ -3,7 +3,7 @@ each asked twice: with ALL files pasted in full ("full") and with the repo map +
 checked by running code, so the score is "the edit works", not "the answer looks right".
 --format file (default) asks for the whole new file; --format edit asks only for SEARCH/REPLACE blocks (much less to write at 4-9 tok/s).
 usage: python bench/edit_eval.py --check                 verify the tasks themselves with the reference solutions (no model, ~1 s)
-       python bench/edit_eval.py --model qwen35m|qwen35l [--filler 20] [--tasks 1,2,3,4,5] [--tokens 450] [--deadline 900]   (uses the NPU and GPU: run alone)"""
+       python bench/edit_eval.py --model qwen3|qwen3s [--filler 20] [--tasks 1,2,3,4,5] [--tokens 450] [--deadline 900]   (uses the NPU and GPU: run alone)"""
 import http.client, json, os, re, subprocess, sys, tempfile, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, os.path.join(ROOT, "src"))
@@ -112,7 +112,7 @@ def check_tasks():
 
 
 def run():
-    model, filler, tokens, deadline, fmt = arg("--model", "qwen35m"), arg("--filler", 20), arg("--tokens", 450), arg("--deadline", 900), arg("--format", "file")
+    model, filler, tokens, deadline, fmt = arg("--model", "qwen3"), arg("--filler", 20), arg("--tokens", 450), arg("--deadline", 900), arg("--format", "file")
     tids = [int(x) for x in arg("--tasks", "1,2,3,4,5").split(",")]
     tmp = tempfile.mkdtemp(); T = "e" * 43; t0 = time.time()
     p = subprocess.Popen([sys.executable, "-u", os.path.join(ROOT, "src", "serve.py")], cwd=ROOT, stdout=subprocess.PIPE, text=True,

@@ -2,12 +2,12 @@
 mixes general writing and code, with facts planted early and asked about late, a small context window so the conversation gets compacted,
 and a code edit that refers to code written many turns earlier. Uses the NPU and GPU: run it alone. Bounded: --turns, a per-request
 timeout and a global deadline, so it cannot hang.
-usage: python tests/eval_long_chat.py [--model qwen35s|qwen35m|qwen35l] [--turns 24] [--tokens 90] [--window 2048] [--deadline 900]
+usage: python tests/eval_long_chat.py [--model qwen3|qwen3s] [--turns 24] [--tokens 90] [--window 2048] [--deadline 900]
 Prints one line per turn (seconds, tokens read/reused, decode tok/s) and the checks; exit 1 when a check fails."""
 import http.client, json, os, subprocess, sys, tempfile, time
 
 arg = lambda k, d: type(d)(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d
-MODEL, TURNS, TOKENS, WINDOW, DEADLINE = arg("--model", "qwen35s"), arg("--turns", 24), arg("--tokens", 90), arg("--window", 2048), arg("--deadline", 900)
+MODEL, TURNS, TOKENS, WINDOW, DEADLINE = arg("--model", "qwen3"), arg("--turns", 24), arg("--tokens", 90), arg("--window", 2048), arg("--deadline", 900)
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); T = "l" * 43
 tmp = tempfile.mkdtemp()
 p = subprocess.Popen([sys.executable, "-u", os.path.join(ROOT, "src", "serve.py")], cwd=ROOT, stdout=subprocess.PIPE, text=True,
@@ -74,7 +74,7 @@ FILLER = ["Write one sentence about why backups matter.", "Give me a one-line sh
 fails = []
 try:
     assert call("/profile", {"profile": "assisted"})[0] == 200
-    assert call("/rules", {"context_tokens": WINDOW, "llm_vram_gb": 5.0, "gpu_share": {"qwen35m": 0.0, "qwen35l": 0.0}, "compact_at": 0.7})[0] == 200
+    assert call("/rules", {"context_tokens": WINDOW, "llm_vram_gb": 5.0, "compact_at": 0.7})[0] == 200
     s, b = call("/mode", {"mode": "llm", "model": MODEL}, timeout=400)
     if s != 200:
         raise SystemExit(f"load failed: {b}")

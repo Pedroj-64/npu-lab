@@ -1,5 +1,7 @@
 # Roadmap
 
+> **Qwen3.5 was removed on 2026-10-15** (it needs the GPU for every token; see `docs/DECISIONS.md`). Backlog items below that mention Qwen3.5, the 4B, GPU shares or the state cache are obsolete and kept only as history. / Los puntos que mencionan Qwen3.5, el 4B, el reparto de GPU o la caché de estado están obsoletos.
+
 > **Product direction (14 Oct 2026):** the always-on assistant plan with phases, tasks and acceptance checks lives in [`docs/PLAN.md`](docs/PLAN.md) ([ES](docs/PLAN.es.md)); working rules in [`docs/WORKING_RULES.md`](docs/WORKING_RULES.md). This file keeps the technical backlog by priority and the oldest-first rule below.
 
 Solo lo pendiente, por prioridad (impacto esperado / esfuerzo). Lo hecho, con sus cifras, está en [`docs/CHANGELOG.md`](docs/CHANGELOG.md); lo que se miró y

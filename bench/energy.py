@@ -4,7 +4,7 @@ Power sources (no root needed):
   - NVIDIA board: `nvidia-smi --query-gpu=power.draw.instant` (documented accuracy +-5 W), streamed every 100 ms
   Not counted: screen, SSD, RAM outside the package, fans, charger losses (RAPL energy_uj is root-only; the battery reports 0 W on AC).
 Total = APU + GPU. "idle" = the same process with the model loaded and nothing running, so net J/token = (P - P_idle) / (tok/s) is the marginal cost.
-usage: .venv/bin/python bench/energy.py --model models/qwen35_2b [--share 0.5] [--engine assisted|npu] [--phases decode,prefill] [--runs 3] [--json out.jsonl]
+usage: .venv/bin/python bench/energy.py --model models/qwen3 [--share 0.5] [--engine assisted|npu] [--phases decode,prefill] [--runs 3] [--json out.jsonl]
   --engine npu: Qwen3 NPU-only profile (gpu=False, prompts read by the NPU); assisted (default): GPU reads prompts and attends."""
 import argparse, glob, json, os, statistics as st, subprocess, sys, threading, time
 for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
@@ -81,8 +81,8 @@ import qwen_npu as Q
 if a.engine == "npu":
     m = Q.Qwen(a.model, gpu=False)
 else:
-    import qwen35_npu as Q35
-    m = Q35.load_engine(a.model, gpu=True, gpu_share=a.share, vram_gb=a.vram_gb, max_ctx=12000 if "qwen35" in a.model else 8192)
+    import qwen_npu as Q35
+    m = Q35.Qwen(a.model, gpu=True, vram_gb=a.vram_gb, max_ctx=8192)
 t0 = time.perf_counter(); time.sleep(a.idle_seconds)
 idle = S.watts(t0, time.perf_counter())
 rng = np.random.default_rng(0)
@@ -126,7 +126,7 @@ if "decode" in a.phases:
 if "prefill" in a.phases:
     out += measure(f"prefill {n_pf}", prefill, n_pf)
 S.stop()
-label = f"{os.path.basename(a.model)} {a.engine}" + (f" share {a.share:.0%}" if a.engine == "assisted" and "qwen35" in a.model else "")
+label = f"{os.path.basename(a.model)} {a.engine}"
 ms = lambda xs: f"{st.mean(xs):.2f} ± {st.stdev(xs) if len(xs) > 1 else 0:.2f}"
 print(f"## {label}  ({state['profile']}, AC={state['ac']}, governor={state['governor']}, kernel={state['kernel']}, max VRAM seen {S.vram:.0f} MiB)")
 print(f"idle, no model: APU {nomodel[0]:.2f} W + GPU {nomodel[1]:.2f} W; idle, model loaded: APU {idle[0]:.2f} W + GPU {idle[1]:.2f} W = {idle[0] + idle[1]:.2f} W")

@@ -7,7 +7,7 @@ import argparse, json, os, re, statistics as st, subprocess, sys, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HIST = os.path.join(ROOT, "bench", "history.jsonl")
 PY = os.path.join(ROOT, ".venv", "bin", "python")
-BUSY = r"src/(serve|chat_cli|qwen|qwen35)|bench/(perf_baseline|energy)"
+BUSY = r"src/(serve|chat_cli|qwen)|bench/(perf_baseline|energy)"
 
 
 def sh(cmd):

@@ -7,7 +7,7 @@ Versión en inglés: [`ARCHITECTURE.md`](ARCHITECTURE.md). Etiquetas: `[medido]`
 - **GPU** (opcional, NVIDIA/CUDA): lee prompts largos, guarda el KV y el estado de DeltaNet, puede calcular del 0 al 75 % de cada matriz y construye índices grandes de embeddings.
 - **CPU**: pegamento, atención del prefill solo-NPU (numpy de un hilo), tokenización, búsqueda, servidor.
 
-Perfiles: **Solo NPU** (Qwen3-0.6B ≈ 19.8 tok/s, 1.7B ≈ 10.1 tok/s, contexto 4k) y **Asistido** (Qwen3.5 0.8B/2B/4B con la GPU) `[medido, bench/PERF.md]`.
+Perfiles: **Solo NPU** (Qwen3-0.6B ≈ 19.8 tok/s, 1.7B ≈ 10.1 tok/s, contexto 4k) y **Asistido** (los mismos modelos con la GPU leyendo prompts y guardando el KV) `[medido, bench/PERF.md]`.
 
 ## Flujo de una petición
 ```
@@ -15,8 +15,8 @@ cliente (web/index.html, launcher, app Tauri, VS Code por /v1, puente al celular
    -> src/serve.py  (solo 127.0.0.1; token bearer + código de acceso de un solo uso; comprobación Host/Origin)
         -> router.py / decide.py   elegir: docs | web | historial | chat simple
         -> search.py / documents.py / docs.py / web.py   recuperar extractos (MiniLM en NPU, GPU para índices grandes)
-        -> statecache.py / pins.py   reutilizar el estado del prefijo, conservar literales las líneas con datos al compactar
-        -> qwen_npu.py | qwen35_npu.py (+gpu_qwen35.py)   generar tokens
+        -> pins.py   conservar literales las líneas con datos al compactar
+        -> qwen_npu.py (+gpu_qwen.py)   generar tokens
         <- respuesta en flujo, fuentes visibles para el usuario
 ```
 

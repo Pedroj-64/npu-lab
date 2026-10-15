@@ -15,10 +15,10 @@ A local assistant that runs small language models on the **first-generation AMD 
 | Area | Files |
 |---|---|
 | Server, API, OpenAI-compatible bridge | `src/serve.py` |
-| Engines | `src/qwen_npu.py` (Qwen3, NPU only), `src/qwen35_npu.py` + `src/gpu_qwen35.py` (Qwen3.5, assisted) |
+| Engines | `src/qwen_npu.py` (Qwen3, NPU only), `src/gpu_qwen.py` (optional GPU help) |
 | Search and documents | `src/search.py`, `src/documents.py`, `src/docs.py`, `src/hybrid.py` (off), `src/gate.py` (off), `src/web.py` |
 | Routing and decisions | `src/router.py`, `src/decide.py` |
-| Context | `src/statecache.py`, `src/pins.py`, `src/repomap.py`, `src/facts.py`, `src/chats.py` |
+| Context | `src/pins.py`, `src/repomap.py`, `src/facts.py`, `src/chats.py` |
 | Agent | `src/agent.py`, `src/project.py` |
 | UI | `web/index.html` (vanilla JS), `launcher/` (Rust) |
 | Measurements | `bench/` (scripts), `bench/*.md` (reports), `bench/history.jsonl` (continuous log) |

@@ -9,7 +9,28 @@ The NPU keeps the decode matvecs (the weight stream); per token and layer only q
 import numpy as np
 import torch
 import torch.nn.functional as F
-from gpu_qwen35 import Lin
+
+class Lin:
+    """y = x @ W.T with W resident in VRAM either as bf16 or as int8 + a per-row scale (the same quantisation the NPU uses, so a model
+    that does not fit in bf16 still reads prompts with the weights it decodes with)."""
+    def __init__(self, W, int8):
+        if int8:
+            self.q = torch.empty(W.shape, dtype=torch.int8, device=W.device)
+            self.s = torch.empty(W.shape[0], dtype=torch.bfloat16, device=W.device)
+            for r in range(0, W.shape[0], 4096):                  # blocks of rows: no float32 copy of the whole matrix (1 GB for the output head)
+                blk = W[r:r + 4096].float()
+                sc = blk.abs().amax(1) / 127
+                sc[sc == 0] = 1
+                self.q[r:r + 4096] = torch.round(blk / sc[:, None]).to(torch.int8)
+                self.s[r:r + 4096] = sc.to(torch.bfloat16)
+        else:
+            self.q, self.s = W, None
+
+    def __call__(self, x):
+        if self.s is None:
+            return x @ self.q.T
+        return (x @ self.q.to(x.dtype).T) * self.s
+
 
 DEV = "cuda"
 CHUNK = 2048          # prompt tokens per forward pass (bounds activation memory)

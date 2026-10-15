@@ -31,8 +31,8 @@ Q.NpuLin.__init__ = init
 if a.engine == "npu":
     m = Q.Qwen(a.model, gpu=False)
 else:
-    import qwen35_npu as Q35
-    m = Q35.load_engine(a.model, gpu=True, gpu_share=a.share, vram_gb=4.5, max_ctx=4096)
+    import qwen_npu as Q35
+    m = Q35.Qwen(a.model, gpu=True, vram_gb=4.5, max_ctx=4096)
 K0 = m.npu.K
 bytes_tok = sum(mm * K0 * len(pieces) for lin in made for (mm, s, bi, n, pieces) in lin.chunks)
 calls_tok = sum(len(pieces) for lin in made for (mm, s, bi, n, pieces) in lin.chunks)
@@ -45,7 +45,7 @@ for run in range(a.runs + 1):                                   # first run = wa
     for _ in range(a.tokens):
         logits = m.step(int(np.argmax(logits)), pos); pos += 1
     wall = (time.perf_counter() - t) / a.tokens * 1e3
-    P = Q.PROF; n = P.get("steps", a.tokens)                    # the Qwen3.5 engine does not count steps itself: the loop above ran a.tokens
+    P = Q.PROF; n = P.get("steps", a.tokens)                    # the engine may not count steps itself: the loop above ran a.tokens
     parts = [v for v in P.values() if isinstance(v, dict) and "wait" in v]
     g = lambda k: sum(v[k] for v in parts) / n * 1e3
     rows.append(dict(wall=wall, step=P["step_total"] / n * 1e3 if "step_total" in P else wall, wait=g("wait"), submit=g("submit"), prep=g("host_prep"), post=g("post"), calls=sum(v["calls"] for v in parts) / n, disp=sum(v["dispatches"] for v in parts) / n))

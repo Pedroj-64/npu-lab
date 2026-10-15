@@ -4,7 +4,7 @@ pieces, submit one run per piece, wait, sync the output, int32 -> scaled float. 
  V1 : preconfigured runs (pyxrt.run + set_arg once; per call only start() and wait())
  V2 : V1 without the output sync (INVALID: the outputs then differ from V0, so the sync from the device is needed; kept to show it)
  V3 : V1 + post-processing without the int64 temporary
-usage: .venv/bin/python bench/call_overhead.py M NK [--calls 300]   (K = 2048, NK pieces of K0 = 2048 as 'down' of Qwen3.5-2B uses 3)   one process = one measurement; NPU free
+usage: .venv/bin/python bench/call_overhead.py M NK [--calls 300]   (K = 2048, NK pieces of K0 = 2048 as 'down' of a 2B-class model would use 3)   one process = one measurement; NPU free
 Prints a JSON line (appended to bench/call_overhead.jsonl)."""
 import json, os, sys, time
 import numpy as np

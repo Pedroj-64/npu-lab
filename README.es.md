@@ -8,7 +8,7 @@ Experimentos y asistente local para la NPU AMD XDNA1 (Ryzen 7040 / 8040 «Phoeni
 La NPU de primera generación es más lenta que una GPU, pero es eficiente y está siempre disponible. npu-lab se está convirtiendo en un asistente de modelos pequeños para ella: búsqueda semántica privada, un mapa de proyecto que se consulta barato, ayuda de fondo para quien programa y, más adelante, un cliente de escritorio y un puente al celular. Plan, tareas y comprobaciones de aceptación: [`docs/PLAN.es.md`](docs/PLAN.es.md). Arquitectura: [`docs/ARCHITECTURE.es.md`](docs/ARCHITECTURE.es.md). Reglas de trabajo: [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/WORKING_RULES.es.md`](docs/WORKING_RULES.es.md). El trabajo ajeno sobre este hardware se sigue en [`docs/RESEARCH_LOG.md`](docs/RESEARCH_LOG.md).
 
 ## Qué funciona hoy
-- Chat local con la NPU generando cada token (Qwen3 / Qwen3.5, 0.6B a 4B), con ayuda opcional de la GPU para contexto largo, documentos, documentación local y búsqueda web.
+- Chat local con la NPU generando cada token (Qwen3, 0.6B y 1.7B), con ayuda opcional de la GPU para contexto largo, documentos, documentación local y búsqueda web.
 - Modo agente con confirmación en cada escritura, puente compatible con OpenAI para VS Code, embeddings MiniLM en la NPU.
 - Cifras y cómo reproducirlas: [`bench/RESULTS.md`](bench/RESULTS.md), [`bench/PERF.md`](bench/PERF.md).
 

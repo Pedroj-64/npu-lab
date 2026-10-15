@@ -18,6 +18,22 @@ Status / Estado: `unverified` (sin verificar) → `reproduced here` (reproducido
 | 2026-10-14 | [arXiv 2512.13282](https://arxiv.org/pdf/2512.13282) | GEMM performance across Ryzen AI NPU generations using IRON | unverified | T4.1 |
 | 2026-10-14 | [amd/iron](https://github.com/amd/iron) | Official IRON repo; targets NPU1/NPU2, bfloat16 primary; no Whisper example found | unverified | T4.1 |
 
+## Candidate dense models for NPU-only (2026-10-15) / Modelos densos candidatos para solo NPU
+Decode is DMA-bound, so tok/s ≈ 15.8 GB/s (effective, from Qwen3-1.7B: 9.2 tok/s × 1.72 GB) ÷ int8 bytes per token. Figures below are **estimates from parameter counts, not measurements**; architecture and licence details come from web search and must be checked on each model card. / tok/s estimados, sin medir.
+
+| Model | Params | Est. tok/s | Licence (per sources) | Engine work | Status |
+|---|---|---|---|---|---|
+| Qwen3-1.7B / 0.6B (current) | 1.7B / 0.6B | 9.2 / 18.5 measured | Apache-2.0 | none | in use |
+| Llama 3.2 1B | 1.24B | ~12 | Llama 3.2 Community (not Apache) | small: no q/k-norm (engine already has the non-Qwen3 path), llama3 RoPE scaling | unverified |
+| Gemma 3 1B | ~1.0B | ~15 | check card (sources conflict) | medium: sliding-window layers, extra norms, GeLU | unverified |
+| Gemma 4 E2B | ~2B effective | unknown | Apache-2.0 per Wikipedia, conflicting | unknown: "E" models use per-layer embeddings | unverified |
+| SmolLM3-3B | 3.08B | ~5 | Apache-2.0 | small-medium: GQA 4 groups, NoPE every 4th layer | unverified |
+| Ministral 3 3B | 3.4B text + 0.4B vision | ~4.6 | Apache-2.0 | small-medium: dense Mistral-style, text checkpoints load as `Ministral3Model` | unverified |
+| Phi-4-mini | 3.8B | ~4 | MIT | small-medium | unverified |
+| Granite 4.x 3B | ~3B | ~5 | Apache-2.0 | check: some Granite 4 models are hybrid (Mamba) | unverified |
+
+Sources: [premai.io](https://www.premai.io/blog/best-lightweight-language-models-worth-running/), [Turing Post](https://www.turingpost.com/p/slmslist), [tinyweights.dev](https://tinyweights.dev/posts/best-small-language-models-2026/), [Ministral 3 on Hugging Face](https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-BF16), [SmolLM3 blog](https://www.huggingface.co/blog/smollm3), [Gemma 3 in NeMo docs](https://docs.nvidia.com/nemo/megatron-bridge/latest/models/gemma/gemma3.html).
+
 ## Priority leads from the first scan / Pistas prioritarias del primer escaneo
 First automatic scan (2026-10-14) found XDNA1-specific work that changes the plan; all are single-author or small and stay `unverified` until reproduced here. / El primer escaneo encontró trabajo específico para XDNA1; todo sigue `sin verificar` hasta reproducirlo.
 - [drakosha/whisper-xdna](https://github.com/drakosha/whisper-xdna): Whisper encoder on XDNA1 with the open toolchain (XRT + MLIR-AIE/IRON). Directly relevant to **T4.1** (voice). Check kernels, dtype, speed, and licence first.

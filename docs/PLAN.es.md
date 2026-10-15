@@ -10,7 +10,7 @@ Decisiones (dueño, 2026-10-14): abrir el proyecto de verdad (la licencia ya es 
 ## 2. Qué existe y qué no
 | Existe | Falta |
 |---|---|
-| Qwen3 0.6B/1.7B solo en NPU; Qwen3.5 0.8B–4B asistido | Voz (ASR/VAD), visión, reranker medido |
+| Qwen3 0.6B/1.7B solo en NPU (GPU opcional) | Voz (ASR/VAD), visión, reranker medido |
 | Embeddings MiniLM en NPU (coseno ≥ 0.996, ~20 trozos/s) | Acceso remoto / celular |
 | Clasificador `decide.py` (ruta 0.85), `router.py` | Cliente de escritorio nativo |
 | `search.py`, `documents.py`, `docs.py`, `web.py`, `repomap.py` (solo Python) | Integración con graphify |
@@ -47,6 +47,8 @@ FastFlowLM, Lemonade y AMD IRON apuntan a **XDNA2** (Ryzen AI 300/400); la guía
 - [~] **T1.4 Botón graphify.** Hecho el 2026-10-15: `src/graph.py`, `GET/POST /project/graph`, `POST /project/graph/query`, la pestaña Proyecto y `tests/test_graph.py` (pasa; probado contra el servidor real con un HOME temporal, sin red). Medido el 2026-10-15 en tres proyectos reales: una respuesta del mapa son ~1 200 tokens frente a ~12 600–37 500 de los archivos que cita (67–99 % menos) y ~224 000–338 000 de todo el código; ver `bench/GRAPH_TOKENS.md` (la relevancia de las respuestas aún no se mide). Falta: un conjunto pequeño de preguntas para medir relevancia; conectar el respaldo `repomap.py`. `src/graph.py` ejecuta `graphify <ruta> --update` como subproceso; `POST /project/graph` y `GET /project/graph/query?q=…&budget=N` en `src/serve.py`, tras las comprobaciones de token y Host/Origin existentes; `repomap.py` queda de respaldo. *Aceptación:* en un repo de prueba, `--update` no hace llamadas de red para código, y `graphify query --budget 1500` gasta menos tokens que enviar los archivos (medir ambos).
 - [ ] **T1.5 Calidad de la búsqueda semántica** (`ROADMAP.md` §4, en orden): chunking por encabezados en `documents.py`, truncado por tokens, falso positivo typescript/typst, reranker medido. `hybrid.py` y `gate.py` siguen apagados salvo que el recall@4 mejore ≥ 0.05. *Aceptación:* recall@4 antes y después con el conjunto de evaluación existente.
 - [ ] **T1.6 Información actual.** `web.py`: fechas de publicación, preferir resultados recientes en preguntas sensibles al tiempo, caché con caducidad. *Aceptación:* tres preguntas con fecha respondidas con fuentes fechadas.
+
+- [ ] **T1.7 Segunda familia densa para solo NPU.** Qwen3.5 se eliminó (necesita la GPU para cada token), así que el modo solo NPU sigue con Qwen3. **Decisión del dueño 2026-10-15: los modelos nuevos son pruebas o alternativas, y solo se adoptan si corren bien sin cargar el PC; si no, se queda Qwen3.** Candidatos y estimaciones en `RESEARCH_LOG.md`. Empezar con Llama 3.2 1B o Gemma 3 1B (≈1 GB por token, 12–15 tok/s esperados) y un 3B (SmolLM3 o Ministral 3, ~5 tok/s). *Aceptación:* el modelo carga en `src/qwen_npu.py` tras una bandera, comprobación token a token contra la referencia (`bench/token_equiv.py`), 3 corridas de `bench/watch.py` y `bench/energy.py` y una fila en `bench/PERF.md`; si no, anotar el descarte en `docs/DECISIONS.md`.
 
 ### Fase 2 — Cliente de escritorio y web
 - [ ] **T2.1 Cascarón Tauri** en `app/`, siguiendo `launcher/src/main.rs`: envuelve el `serve.py` local, icono de bandeja, arranque con la sesión, indicador de NPU/consumo, paleta global de búsqueda. Sin Electron. *Aceptación:* arranca, muestra la bandeja, cierra limpio y no deja un `serve.py` huérfano.

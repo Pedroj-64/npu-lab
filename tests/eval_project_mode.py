@@ -1,12 +1,12 @@
 """End to end project mode with a real model: set a project folder, ask for an edit in plain words, apply the answer through /project/apply and run the check.
 Uses the NPU and GPU: run alone. Bounded (one task, ~2-3 min on the 4B).
-usage: python tests/eval_project_mode.py [--model qwen35l] [--task 1] [--tokens 450]"""
+usage: python tests/eval_project_mode.py [--model qwen3] [--task 1] [--tokens 450]"""
 import http.client, json, os, shutil, subprocess, sys, tempfile, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); sys.path.insert(0, os.path.join(ROOT, "bench"))
 import edit_eval as E
 
 arg = lambda k, d: type(d)(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d
-MODEL, TID, TOKENS = arg("--model", "qwen35l"), arg("--task", 1), arg("--tokens", 450)
+MODEL, TID, TOKENS = arg("--model", "qwen3"), arg("--task", 1), arg("--tokens", 450)
 T = "p" * 43; tmp = tempfile.mkdtemp(); proj = tempfile.mkdtemp(dir=os.path.expanduser("~"))       # the project must be inside the home
 E.project(proj, 20)
 p = subprocess.Popen([sys.executable, "-u", os.path.join(ROOT, "src", "serve.py")], cwd=ROOT, stdout=subprocess.PIPE, text=True,
@@ -21,7 +21,7 @@ def call(path, body, timeout=400):
 
 ok = False
 try:
-    call("/profile", {"profile": "assisted"}); call("/rules", {"context_tokens": 8192, "llm_vram_gb": 5.0, "gpu_share": {"qwen35m": 0.0, "qwen35l": 0.0}, "compact_at": 0, "project_root": proj})
+    call("/profile", {"profile": "assisted"}); call("/rules", {"context_tokens": 8192, "llm_vram_gb": 5.0, "compact_at": 0, "project_root": proj})
     s, b = call("/mode", {"mode": "llm", "model": MODEL})
     assert s == 200, b
     target, instr = E.TASKS[TID][0], E.TASKS[TID][1]

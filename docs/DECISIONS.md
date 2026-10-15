@@ -3,6 +3,11 @@
 Why things are built the way they are, and what was looked at and NOT built. Moved verbatim from the old `ROADMAP.md` (Oct 2026), plus the
 Phase 0 decisions at the top. Labels in the old text: measured = in `bench/RESULTS.md` / `bench/PERF.md`; estimate = extrapolated; proposal = does not exist.
 
+
+## Qwen3.5 removed (2026-10-15) / Qwen3.5 eliminado
+Decision of the owner: the project is NPU-first and Qwen3.5 (hybrid Gated DeltaNet) needs the GPU for every token, so the 0.8B/2B/4B weights (14.8 GB), `src/qwen35_npu.py`, `src/gpu_qwen35.py`, `src/statecache.py`, the per-model GPU share and VRAM-margin settings, their tests and the Qwen3.5-only benchmark scripts were deleted. Everything is recoverable from git (last commit that contains it: `e23d997`). Reports in `bench/` (`ENERGY.md`, `FASE2.md`, `PROPUESTA_GPU_SANA.md`, `HANDOFF.md`, ...) still describe those measurements and are kept as the historical record; their scripts may no longer exist. Qwen3 0.6B/1.7B stay as the NPU-only models; newer dense models are tested as experiments (plan task T1.7), not adopted by default.
+/ Decisión del dueño: el proyecto es NPU primero y Qwen3.5 necesita la GPU para cada token; se borraron los pesos, el motor, la caché de estado, el reparto de GPU, sus pruebas y los scripts de medición exclusivos. Todo se recupera desde git (`e23d997`). Los informes de `bench/` se conservan como registro histórico.
+
 ## Decisión: endpoint OpenAI mínimo para el editor (13 oct 2026)
 - **Solo texto, sin `tools`:** el modelo local no llama herramientas, así que el modo Agent de Copilot no se soporta; el agente propio (`src/agent.py`, web y CLI) sigue siendo el camino con confirmación. Se amplía solo si hay un modelo y un formato de herramientas medidos.
 - **Sin enrutado ni búsqueda:** el editor ya aporta su contexto; meter web/documentos ahí cambiaría el prompt sin que el usuario lo vea.

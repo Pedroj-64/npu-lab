@@ -208,7 +208,7 @@ class NpuLin:
     """y = W @ x (+ b) with int8 weights. W (M x K) is cut into row chunks (`chunks`) and into K/k0 column pieces; every piece is
     one NPU call of the shared kernel. All calls of one matvec are submitted together and collected afterwards."""
     def __init__(self, npu, W, b=None, chunks=None, tail=None):
-        self.npu, self.b, self.chunks, self.tail = npu, b, [], tail      # tail: the GPU's share of the rows (rows after W's), see gpu_qwen35.GpuTail
+        self.npu, self.b, self.chunks, self.tail = npu, b, [], tail      # tail: unused (the GPU share of rows was removed with Qwen3.5)
         px, K0 = npu.px, npu.K
         self.nk = -(-W.shape[1] // K0)                    # K not a multiple of k0: the last piece is zero-padded
         r = 0

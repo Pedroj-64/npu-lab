@@ -1,6 +1,6 @@
 """The terminal chat (src/chat_cli.py) against a REAL model, driven through pipes: scenario 1 solves task 7 of the agent bank answering 'y' to every
 "Do it? [y/N]"; scenario 2 asks task 6 and answers 'n' at the first confirmation (nothing may be written). Settings live in a temp folder, the user's rules are untouched.
-usage: .venv/bin/python bench/cli_smoke.py [--model qwen35l] [--deadline 900]     (NPU+GPU: run alone)
+usage: .venv/bin/python bench/cli_smoke.py [--model qwen3] [--deadline 900]     (NPU+GPU: run alone)
 Prints PASS/FAIL lines and the whole transcript to bench/.cli_smoke.txt (a temporary, not committed)."""
 import os, select, shutil, subprocess, sys, tempfile, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(ROOT, "bench")); sys.path.insert(0, os.path.join
 import agent_tasks as T
 
 arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
-model, deadline = arg("--model", "qwen35l"), float(arg("--deadline", 900))
+model, deadline = arg("--model", "qwen3"), float(arg("--deadline", 900))
 T.fill_original_refs()
 tmp = tempfile.mkdtemp(); proj = tempfile.mkdtemp(dir=os.path.expanduser("~")); T.write_project(proj, "base")
 env = {**os.environ, "NPU_LAB_TRASH": tmp + "/trash", **{f"NPU_LAB_{k}": f"{tmp}/{v}" for k, v in dict(RULES="rules.json", DOCS="d", ROUTING="r.json", SETTINGS="s.json", CHATS="c", FACTS="f.json").items()}}

@@ -154,20 +154,7 @@ try:
             comp = next((l["compacted"] for l in lines if "compacted" in l), None)
             check(f"a conversation past the threshold is compacted into notes ({len(comp['summary']) if comp else 0} chars, kept {comp['kept'] if comp else '-'} messages)",
                   s == 200 and comp is not None and len(comp["summary"]) > 20 and comp["kept"] == 6 and any(l.get("done") is True for l in lines))        # the notes arrive AFTER the answer's done line (compaction runs after the answer)
-        if has_gpu and os.path.exists(os.path.join(ROOT, "models/qwen35_2b/config.json")):
-            check("qwen3.5 refused without the assisted profile", (call("POST", "/profile", {"profile": "npu_only"}), call("POST", "/mode", {"mode": "llm", "model": "qwen35m"}))[1][0] == 409)
-            call("POST", "/profile", {"profile": "assisted"})
-            check("gpu_share must be a per-model object with allowed values", all(call("POST", "/rules", {"gpu_share": g})[0] == 400 for g in (0.3, {"qwen35m": 0.3}, {"qwen35l": 0.5}, {"nope": 0.0})))
-            check("a per-model share is saved, the 4B default stays 0", call("POST", "/rules", {"gpu_share": {"qwen35m": 0.75}})[0] == 200 and json.loads(call("GET", "/rules")[1])["gpu_share_effective"] == {"qwen35s": 0.0, "qwen35m": 0.75, "qwen35l": 0.0})
-            call("POST", "/rules", {"context_tokens": 80000, "gpu_share": {"qwen35m": 0.5}, "compact_at": 0.7})
-            s, _ = call("POST", "/mode", {"mode": "llm", "model": "qwen35m"})
-            check("qwen3.5-2B loads with a 50% GPU share", s == 200)
-            if s == 200:
-                st = json.loads(call("GET", "/status")[1])
-                check(f"qwen3.5: GPU assist on, context {st['context']} tokens", st["gpu_assist"] is True and st["context"] >= 8192)
-                s, body = call("POST", "/chat", {"prompt": "What is the capital of Italy? One sentence.", "tokens": 30, "docs": False, "web": False, "mine": False})
-                text = "".join(json.loads(x).get("token", "") for x in body.decode().splitlines() if x)
-                check(f"qwen3.5 answers ({text.strip()[:40]!r})", s == 200 and ("Rome" in text or "Roma" in text))
+        check("a model that is not in the whitelist is refused", call("POST", "/mode", {"mode": "llm", "model": "qwen35m"})[0] == 400)
         check("unload", call("POST", "/mode", {"mode": "none"})[0] == 200)
         print(f"NPU cycle took {time.time()-t:.0f}s")
     else:

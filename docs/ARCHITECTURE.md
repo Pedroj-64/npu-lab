@@ -7,7 +7,7 @@ Spanish version: [`ARCHITECTURE.es.md`](ARCHITECTURE.es.md). Labels: `[measured]
 - **GPU** (optional, NVIDIA/CUDA): reads long prompts, holds KV cache and DeltaNet state, can compute a 0–75 % share of each matrix, builds big embedding indexes.
 - **CPU**: glue, attention for the NPU-only prefill (single-thread numpy), tokenization, search, server.
 
-Profiles: **NPU only** (Qwen3-0.6B ≈ 19.8 tok/s, 1.7B ≈ 10.1 tok/s, 4k context) and **Assisted** (Qwen3.5 0.8B/2B/4B with the GPU) `[measured, bench/PERF.md]`.
+Profiles: **NPU only** (Qwen3-0.6B ≈ 19.8 tok/s, 1.7B ≈ 10.1 tok/s, 4k context) and **Assisted** (the same models with the GPU reading prompts and holding the KV cache) `[measured, bench/PERF.md]`.
 
 ## Request flow
 ```
@@ -15,8 +15,8 @@ client (web/index.html, launcher, Tauri app, VS Code via /v1, phone bridge)
    -> src/serve.py  (127.0.0.1 only; bearer token + one-time login code; Host/Origin checks)
         -> router.py / decide.py   choose: docs | web | history | plain chat
         -> search.py / documents.py / docs.py / web.py   retrieve excerpts (MiniLM on NPU, GPU for big indexes)
-        -> statecache.py / pins.py   reuse prefix state, keep fact-bearing lines verbatim through compaction
-        -> qwen_npu.py | qwen35_npu.py (+gpu_qwen35.py)   generate tokens
+        -> pins.py   keep fact-bearing lines verbatim through compaction
+        -> qwen_npu.py (+gpu_qwen.py)   generate tokens
         <- streamed reply, sources shown to the user
 ```
 

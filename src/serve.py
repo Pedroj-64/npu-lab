@@ -16,69 +16,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Qwen3.5 (hybrid) needs the GPU: Assisted profile only. Qwen3 (dense) also runs NPU only.
-MODELS = {"qwen35s": "models/qwen35_08b", "qwen35m": "models/qwen35_2b", "qwen35l": "models/qwen35_4b", "qwen3s": "models/qwen3s", "qwen3": "models/qwen3"}
-NEEDS_GPU = ("qwen35s", "qwen35m", "qwen35l")   # whitelist: the API never takes a path
-SHARES = {"qwen35s": (0.0, 0.25, 0.5), "qwen35m": (0.0, 0.25, 0.5, 0.75), "qwen35l": (0.0, 0.25)}   # GPU shares with a measured fit per model (bench/ENERGY.md); the NPU kernels are built per share
-DEFAULT_SHARE = {"qwen35m": 0.5}                                                                       # everything else: 0 (NPU only)
-
-
-# Peak GPU memory (MiB, nvidia-smi) per model and share, measured with llm_vram_gb 5.0 and a 12000-token window (bench/ENERGY.md, bench/PROPUESTA_GPU_SANA.md). Missing entry: only the check after loading applies.
-PEAK_MIB = {("qwen35m", 0.0): 3401, ("qwen35m", 0.25): 3583, ("qwen35m", 0.5): 3825, ("qwen35m", 0.75): 4067, ("qwen35l", 0.0): 5057, ("qwen35l", 0.25): 5277, ("qwen35l", 0.5): 5755}
-ACT_MIB = 64                     # extra GPU memory seen while reading a long prompt after loading: 22 MiB for a 10 000-token prompt on the 4B (the 1024-token chunk buffers, 355 MiB, are already inside the memory limit)
-DEFAULT_VRAM_MARGIN_MIB = 700    # GPU memory kept free for the desktop; the user decides the final value (Settings)
-BUILD_CMD = "python scripts/build_matvec.py --shared4 $(python src/qwen35_npu.py --model {dir} --shapes --share {share})"     # ~80 s on this machine
-
-
-def missing_kernels(model, share, build_dir=None):
-    """Names of the NPU kernels that still have to be built for `model` at GPU share `share` ([] = ready). Nothing is run."""
-    import qwen35_npu
-    cfg = json.load(open(os.path.join(ROOT, MODELS[model], "config.json")))
-    bd = build_dir or os.path.join(ROOT, "build/c4")
-    return [n for n in (f"c4_{m}x{k}" for m, k in qwen35_npu.shapes(qwen35_npu.text_config(cfg), share)) if not os.path.exists(os.path.join(bd, n + ".xclbin"))]
-
-
-def free_vram_mib():
-    try:
-        return int(subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10).stdout.split()[0])
-    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
-        return None               # no NVIDIA tools: nothing to check
-
-
-def own_vram_mib():
-    """GPU memory this very process still holds (the CUDA context stays after a model is unloaded). A new model reuses it, so it does not count against the new model."""
-    try:
-        out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10).stdout
-        return sum(int(m.split(",")[1]) for m in out.strip().splitlines() if m.split(",")[0].strip() == str(os.getpid()))
-    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
-        return 0
-
-
-def vram_refusal(model, share, margin_mib, free_mib):
-    """Message when loading `model` at `share` would leave less than `margin_mib` free for the desktop (from the measured peak), else None."""
-    pk = PEAK_MIB.get((model, share))
-    if free_mib is None or pk is None or free_mib - pk >= margin_mib:
-        return None
-    return (f"Not loaded: {model} at a {share:.0%} GPU share peaks at ~{pk} MiB of GPU memory (measured) and only {free_mib} MiB are free, which would leave {free_mib - pk} MiB for the desktop "
-            f"(your margin is {margin_mib:.0f} MiB). Pick a lower GPU share, close programs that use the GPU, or lower the margin in Settings.")
+# Qwen3 (dense): NPU only by default, the GPU may help in the Assisted profile.
+MODELS = {"qwen3s": "models/qwen3s", "qwen3": "models/qwen3"}   # whitelist: the API never takes a path
 
 
 def rules_view():
-    """What GET /rules returns: the rules plus, per model, the effective share, the allowed shares and which shares still need NPU kernels (so the page can warn)."""
+    """What GET /rules returns."""
     import search
-    rl = search.rules(); kern = {}
-    for m, sh in SHARES.items():
-        if os.path.exists(os.path.join(ROOT, MODELS[m], "config.json")):
-            kern[m] = {str(x): len(missing_kernels(m, x)) for x in sh}
-    return {**rl, "gpu_share_effective": {m: share_of(m, rl) for m in SHARES}, "gpu_share_allowed": SHARES, "gpu_share_kernels_missing": kern,
-            "gpu_share_build_cmd": {m: BUILD_CMD.replace("{dir}", MODELS[m]) for m in SHARES}, "vram_margin_mib": rl.get("vram_margin_mib", DEFAULT_VRAM_MARGIN_MIB)}
+    return search.rules()
 
 
-def share_of(model, rl):
-    """GPU share of decoding for `model`: the user's choice in rules["gpu_share"][model], else the measured default. A scalar from an older rules file is ignored (it used to apply to every model)."""
-    v = rl.get("gpu_share")
-    v = v.get(model) if isinstance(v, dict) else None
-    return float(DEFAULT_SHARE.get(model, 0.0) if v is None else v)
 PROFILES = ("npu_only", "assisted")                           # assisted: GPU/CPU may help bulk indexing
 READ_TOOLS = ("read_file", "list_dir", "file_search", "grep_search", "view", "grep", "glob")                   # editor tools offered to the model over /v1 (chat agent and CLI-style agent names)
 WRITE_TOOLS = ("create_file", "replace_string_in_file", "create_directory", "create", "edit")                  # the editor asks the user before each write
@@ -214,21 +161,6 @@ def set_rules(d):
                 raise Bad(400, f"must be an existing folder inside your home (use ~ for the whole home): {x}")
             clean.append("~" + real[len(home):])
         r["roots"] = clean
-    if "state_cache_gb" in d:
-        v = float(d["state_cache_gb"])
-        if not 0 <= v <= 100:
-            raise Bad(400, "state_cache_gb must be between 0 (off) and 100")
-        r["state_cache_gb"] = v
-    if "gpu_share" in d:
-        g = d["gpu_share"]
-        if not isinstance(g, dict) or any(k not in SHARES or v not in SHARES[k] for k, v in g.items()):
-            raise Bad(400, "gpu_share must be an object {model: share}; allowed: " + ", ".join(f"{k} {list(v)}" for k, v in SHARES.items()))
-        r["gpu_share"] = {**(r["gpu_share"] if isinstance(r.get("gpu_share"), dict) else {}), **{k: float(v) for k, v in g.items()}}
-    if "vram_margin_mib" in d:
-        v = d["vram_margin_mib"]
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 3000:
-            raise Bad(400, "vram_margin_mib must be between 0 and 3000")
-        r["vram_margin_mib"] = float(v)
     if "compact_at" in d:
         a = float(d["compact_at"])
         if not (a == 0 or 0.3 <= a <= 0.95):
@@ -301,26 +233,22 @@ def doctor():
         add("memlock", False, "not applicable here", "")
     from qwen_npu import shapes
     import prefill_npu
-    HF = {"qwen3": "Qwen/Qwen3-1.7B", "qwen3s": "Qwen/Qwen3-0.6B", "qwen35s": "Qwen/Qwen3.5-0.8B", "qwen35m": "Qwen/Qwen3.5-2B", "qwen35l": "Qwen/Qwen3.5-4B"}
+    HF = {"qwen3": "Qwen/Qwen3-1.7B", "qwen3s": "Qwen/Qwen3-0.6B"}
     for name, d in MODELS.items():
         has_model = os.path.isdir(os.path.join(ROOT, d)) and any(f.endswith(".safetensors") for f in os.listdir(os.path.join(ROOT, d)))
-        if not has_model and name not in ("qwen3", "qwen35m"):
+        if not has_model and name != "qwen3":
             continue                                  # optional models: nothing to report until you download them
         add(f"model_{name}", has_model, d if has_model else f"{d}/model.safetensors missing",
             f"Download {HF[name]} (safetensors, tokenizer.json, config.json) into {d}/.")
         if has_model:
             cfg = json.load(open(os.path.join(ROOT, d, "config.json")))
-            import qwen35_npu
-            import search as _s
-            share = share_of(name, _s.rules())
-            need = [f"c4_{m}x{k}" for m, k in (qwen35_npu.shapes(qwen35_npu.text_config(cfg), share) if name in NEEDS_GPU else shapes(cfg))]
+            need = [f"c4_{m}x{k}" for m, k in shapes(cfg)]
             miss = [n for n in need if not os.path.exists(os.path.join(ROOT, "build/c4", n + ".xclbin"))]
             add(f"kernels_{name}", not miss, "all built" if not miss else f"{len(miss)} missing",
-                f"python scripts/build_matvec.py --shared4 $(python src/qwen35_npu.py --model {d} --shapes" + (f" --share {share}" if name in NEEDS_GPU and share else "") + ")")
-            if name not in NEEDS_GPU:                 # Qwen3.5 reads prompts on the GPU: no NPU prefill kernels
-                missp = [x for x in prefill_npu.shapes(cfg) if not os.path.exists(os.path.join(ROOT, prefill_npu.xclbin_name(*x) + ".xclbin"))]
-                add(f"prefill_{name}", not missp, "all built" if not missp else f"{len(missp)} missing (prompts will be read slowly)",
-                    f"python scripts/build_prefill.py {d}")
+                f"python scripts/build_matvec.py --shared4 $(python src/qwen_npu.py --model {d} --shapes)")
+            missp = [x for x in prefill_npu.shapes(cfg) if not os.path.exists(os.path.join(ROOT, prefill_npu.xclbin_name(*x) + ".xclbin"))]
+            add(f"prefill_{name}", not missp, "all built" if not missp else f"{len(missp)} missing (prompts will be read slowly)",
+                f"python scripts/build_prefill.py {d}")
     import shutil
     add("documents_pdf", bool(shutil.which("pdftotext")), "pdftotext found" if shutil.which("pdftotext") else "pdftotext missing (PDF files cannot be read)", "sudo pacman -S poppler")
     add("documents_ocr", bool(shutil.which("tesseract")), "tesseract found" if shutil.which("tesseract") else "optional: tesseract missing (scanned PDFs and images cannot be read)",
@@ -390,25 +318,10 @@ def set_mode(mode, model=None, device="npu"):
         if mode == "llm":
             if model not in MODELS:
                 raise Bad(400, f"model must be one of {sorted(MODELS)}")
-            from qwen35_npu import load_engine
-            import search
-            if model in NEEDS_GPU and S.profile != "assisted":
-                raise Bad(409, "Qwen3.5 models use the GPU for prompt reading and attention: switch to the Assisted profile (or pick a Qwen3 model for NPU only)")
+            import qwen_npu, search
             rl = search.rules()
-            margin = float(rl.get("vram_margin_mib", DEFAULT_VRAM_MARGIN_MIB))
-            if model in NEEDS_GPU:
-                share = share_of(model, rl); miss = missing_kernels(model, share)
-                if miss:
-                    raise Bad(409, f"{len(miss)} NPU kernels are missing for {model} at a {share:.0%} GPU share (~80 s to build): " + BUILD_CMD.replace("{dir}", MODELS[model]).replace("{share}", str(share)))
-                free = free_vram_mib()
-                msg = vram_refusal(model, share, margin, None if free is None else free + own_vram_mib())
-                if msg:
-                    raise Bad(409, msg)
-            # assisted: the GPU reads prompts and holds the KV cache / DeltaNet state; the NPU still generates every token
-            S.engine, S.mode, S.model = load_engine(MODELS[model], gpu=S.profile == "assisted", max_ctx=int(rl.get("context_tokens", DEFAULT_CONTEXT)), vram_gb=float(rl.get("llm_vram_gb", 4.0)), gpu_share=share_of(model, rl), cache_gb=float(rl.get("state_cache_gb", 8.0))), "llm", model
-            left = free_vram_mib() if model in NEEDS_GPU else None
-            if left is not None and left - ACT_MIB < margin:                # the failure path below unloads what was just loaded
-                raise Bad(409, f"Unloaded: after loading {model} only {left} MiB of GPU memory are free and reading a long prompt needs ~{ACT_MIB} MiB more; your margin for the desktop is {margin:.0f} MiB. Lower the GPU share, the memory limit or the context window.")
+            # assisted: the GPU reads prompts and holds the KV cache; the NPU still generates every token
+            S.engine, S.mode, S.model = qwen_npu.Qwen(MODELS[model], gpu=S.profile == "assisted", max_ctx=int(rl.get("context_tokens", DEFAULT_CONTEXT)), vram_gb=float(rl.get("llm_vram_gb", 4.0))), "llm", model
         elif mode == "search":
             if device not in ("npu", "gpu", "cpu"):
                 raise Bad(400, "device must be npu|gpu|cpu")
@@ -1017,10 +930,6 @@ def watch_parent():
 
 
 def main():
-    root = os.environ.get("NPU_LAB_STATE") or os.path.expanduser("~/.cache/npu-lab/state")
-    if os.path.isdir(root):                                    # states saved by an older version had the default permissions
-        import statecache
-        statecache.lock_down(root)
     if os.environ.get("NPU_LAB_WATCH_STDIN") == "1":
         watch_parent()
     srv = ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("NPU_LAB_PORT", 0))), H)   # fixed port lets VS Code point at it

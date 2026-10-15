@@ -1,9 +1,9 @@
 """Why does the 2B answer 'None' to every routing question? Two parts.
-1) confusion matrix of a stored result file (CPU only, no model):  .venv/bin/python bench/route_confusion.py bench/decide_results/logprob_qwen35_2b.jsonl [route|mixer]
+1) confusion matrix of a stored result file (CPU only, no model):  .venv/bin/python bench/route_confusion.py bench/decide_results/logprob_<model>.jsonl [route|mixer]
 2) --probe (NPU+GPU, run alone, NOT run yet): loads the model and, for a few questions, prints the 10 most likely next tokens and the probability of each label under
    variants of the prompt: A) as in decide.py (thinking switched off with an empty <think> block), B) without the empty think block, C) the label list also in the system prompt
    as 'Answer: <label>', D) letters A-D instead of words.  The question it answers: is the bias a property of the model (it prefers 'None' as a first word) or of the template/tokens?
-   .venv/bin/python bench/route_confusion.py --probe --model models/qwen35_2b [--n 12]"""
+   .venv/bin/python bench/route_confusion.py --probe --model models/qwen3 [--n 12]"""
 import json, os, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src")); os.chdir(ROOT)
@@ -25,8 +25,8 @@ def confusion(path, task):
 
 
 def probe(model, n):
-    import numpy as np, decide, qwen35_npu as Q35
-    eng = Q35.load_engine(model, gpu=True, gpu_share=0.0, vram_gb=4.5, max_ctx=4096)
+    import numpy as np, decide, qwen_npu as Q35
+    eng = Q35.Qwen(model, gpu=True, vram_gb=4.5, max_ctx=4096)
     data = [json.loads(l) for l in open("bench/decide_data/route.jsonl")]
     data = [r for r in data if r["split"] in ("val", "test")]
     seen = {}
@@ -56,6 +56,6 @@ def probe(model, n):
 
 if __name__ == "__main__":
     if "--probe" in sys.argv:
-        probe(sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else "models/qwen35_2b", int(sys.argv[sys.argv.index("--n") + 1]) if "--n" in sys.argv else 12)
+        probe(sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else "models/qwen3", int(sys.argv[sys.argv.index("--n") + 1]) if "--n" in sys.argv else 12)
     else:
         confusion(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "route")
