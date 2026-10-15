@@ -3,6 +3,11 @@
 What is built, with the numbers measured when it was built. Moved verbatim from the old `ROADMAP.md` (Oct 2026); what is still open lives in
 [`../ROADMAP.md`](../ROADMAP.md) and the reasons for not building things in [`DECISIONS.md`](DECISIONS.md). Newest measurements first in section 0.
 
+## Fase 4 del plan cerrada (15 oct 2026)
+- **Whisper en la NPU reproducido** (`bench/WHISPER_XDNA.md`): tiny, base y small dan la misma transcripción (coseno >= 0.9998), pero son de 2.9x a 5.1x más lentos y gastan de 1.8x a 2.6x más energía por pasada que la CPU; no se integra. Los kernels de GELU/softmax en la NPU no compilaron con mlir-aie 1.4.4.
+- **Informe «XDNA1: qué funciona y qué no»** (`docs/XDNA1_STATUS.md`) y formulario de issue para dueños de este hardware. Nuevo `bench/power_of_command.py` (potencia de toda la máquina mientras corre un comando).
+- Pista más interesante de la comunidad: detección de objetos con 0.11 J por detección frente a 1.86 J en CPU (reportado, sin reproducir, necesita el runtime propietario de AMD).
+
 ## Fases 2 y 3 del plan cerradas (15 oct 2026)
 - **Interfaz:** pestañas Project (con vista de grupos), Sentinel (repos pendientes y ayudas) y Measurements; página pública `site/` (EN/ES) con flujo de GitHub Pages.
 - **Ventana de escritorio** (`app/`, Tauri): bandeja registrada, ocultar al cerrar, arranque `--hidden`, token y puerto 8765 compartidos con el puente.

@@ -5,7 +5,7 @@ The server is reached at 127.0.0.1:$NPU_LAB_PORT (default 8765) with the token i
 Safety: only the listed Telegram user ids get an answer (everyone else is ignored, nothing is sent back); no command reads a file or runs a shell command;
 the bot never receives file contents, only short model answers and counts. Telegram's servers do see the messages (bots are not end-to-end encrypted).
 Spanish: puente al celular: bot de Telegram que habla con el servidor npu-lab de este PC; solo responde a los IDs permitidos y no lee archivos ni ejecuta comandos."""
-import json, os, re, sys, time, urllib.error, urllib.request
+import json, os, re, socket, sys, time, urllib.error, urllib.request
 
 CONF = os.path.expanduser("~/.config/npu-lab/telegram.json")
 TOKEN_FILE = os.path.expanduser("~/.config/npu-lab/token")
@@ -13,6 +13,17 @@ HELP = ("npu-lab on your PC. Messages pass through Telegram's servers.\n\n"
         "/status  what is loaded and how many repos have pending work\n/repos  repos with uncommitted or unpushed work\n/summary  two lines about them, from the local model\n"
         "/commit NAME  secret check + a draft commit message for that repo\n/explain COMMAND  what a shell command does\n/log UNIT  what a user service logged\n"
         "/bench  last speed measurement\n/load [qwen3|qwen3s]  load a model on the NPU\n/unload  free the NPU\n\nAnything else is a question for the local model.")
+
+
+_getaddrinfo = socket.getaddrinfo
+
+
+def _ipv4_first(host, port, family=0, *args, **kw):
+    """Try IPv4 addresses before IPv6: on a network whose IPv6 route to Telegram hangs, the first connect attempt would otherwise wait for its whole timeout."""
+    return sorted(_getaddrinfo(host, port, family, *args, **kw), key=lambda a: a[0] != socket.AF_INET)
+
+
+socket.getaddrinfo = _ipv4_first
 
 
 class LocalError(Exception):
@@ -51,8 +62,8 @@ def _clip(t, n=3500):
     return t if len(t) <= n else t[:n] + "\n[...]"
 
 
-def handle(text, local, history):
-    """Reply text for one allowed user's message. `history`: this user's list of {role, content} (edited in place, last 6 turns kept)."""
+def handle(text, local, history, say=None):
+    """Reply text for one allowed user's message. `history`: this user's list of {role, content} (edited in place, last 6 turns kept). `say`: optional function that sends an interim message (a model load takes about a minute)."""
     text = (text or "").strip()
     if not text:
         return "Send text."
@@ -102,6 +113,8 @@ def handle(text, local, history):
             return f"{r['ts'].replace('T', ' ')}: decode {r['decode']} tok/s, 256-token prompt {r.get('prefill_256')} tok/s" + (" - REGRESSION" if r.get("regression") else "")
         if cmd == "/load":
             m = arg if arg in ("qwen3", "qwen3s") else "qwen3s"
+            if say:
+                say(f"Loading {m} on the NPU, about a minute (the 1.7B can take longer)...")
             local.call("/mode", {"mode": "llm", "model": m})
             return f"{m} loaded."
         if cmd == "/unload":
@@ -144,7 +157,7 @@ class Bridge:
         if uid not in self.allowed or chat is None or not text:
             return None                                                          # strangers get no answer at all
         self.api("sendChatAction", {"chat_id": chat, "action": "typing"})
-        reply = handle(text, self.local, self.hist.setdefault(uid, []))
+        reply = handle(text, self.local, self.hist.setdefault(uid, []), say=lambda t: self.api("sendMessage", {"chat_id": chat, "text": t}))
         self.api("sendMessage", {"chat_id": chat, "text": reply})
         return reply
 

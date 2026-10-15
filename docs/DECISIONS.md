@@ -6,6 +6,11 @@ Phase 0 decisions at the top. Labels in the old text: measured = in `bench/RESUL
 
 
 
+
+## Phase 4 decisions (2026-10-15) / Decisiones de la Fase 4
+- **Whisper on the NPU is NOT integrated for now.** Reproduced the community encoder (tiny, base, small): correct and real-time, but 2.9x to 5.1x slower and 1.8x to 2.6x more energy per pass than the CPU (`bench/WHISPER_XDNA.md`). The criterion written in the plan was "at least 3x real time AND fewer watts"; watts failed. Reopen if the on-NPU GELU/softmax kernels build on current mlir-aie, or a large-v3 measurement crosses the CPU. It would still free CPU cores (0.8 busy against 6).
+- **The most promising reported use is vision**, not language: object detection at 0.11 J per detection against 1.86 J on the CPU (hnws/xdna1-npu-lab), but it depends on AMD's proprietary Vitis AI runtime. Owner decision needed before any work: it adds a closed dependency to an otherwise open stack.
+
 ## Phases 2 and 3 closing decisions (2026-10-15) / Decisiones al cerrar las Fases 2 y 3
 - **Sentinel uses plain rules, not a classifier.** The events (uncommitted/unpushed work, work older than 3 days, failed user services) are exact facts from git and systemd; a model would add cost and errors. The model only words things on request (`/summary`, commit messages). Measured cost: +0.5 mW on average (`bench/sentinel_power.py`).
 - **The phone bridge goes through Telegram's servers** (not end-to-end encrypted). Mitigation: allow-list by user id, no command reads files or runs shell commands, secret values are never shown. Anyone who needs more privacy should not use it; the rest of npu-lab sends nothing out.

@@ -45,6 +45,12 @@ for i in range(10): B.handle(f"q{i}", local, hist)
 check("history keeps the last 6 messages", len(hist) <= 6)
 check("unknown command", "Unknown" in B.handle("/rm -rf", local, hist))
 check("server error is explained", "busy" in B.handle("/load boom", local, hist) or "loaded" in B.handle("/load qwen3", local, hist))
+import socket
+fam = [a[0] for a in socket.getaddrinfo("localhost", 80, 0, socket.SOCK_STREAM)]
+check("IPv4 addresses are tried first", fam == sorted(fam, key=lambda f: f != socket.AF_INET))
+said = []
+B.handle("/load qwen3s", local, [], say=said.append)
+check("a load announces itself before the wait", len(said) == 1 and "Loading qwen3s" in said[0])
 dead = B.Local(port=1, token="t" * 40)
 check("server down message", "not running" in B.handle("/status", dead, []))
 check("token is sent as bearer", any(c[0] == "GET" and c[2] == "Bearer " + "t" * 40 for c in calls))

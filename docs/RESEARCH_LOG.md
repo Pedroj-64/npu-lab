@@ -13,6 +13,7 @@ Status / Estado: `unverified` (sin verificar) → `reproduced here` (reproducido
 | 2026-10-14 | [Lemonade FLM on Linux](https://lemonade-server.ai/flm_npu_linux.html) | LLMs and Whisper on **XDNA2** only; Ryzen AI 7000/8000 (XDNA1) "not supported" | unverified | PLAN §4 |
 | 2026-10-14 | [Phoronix, Ryzen AI NPUs on Linux](https://www.phoronix.com/news/AMD-Ryzen-AI-NPUs-Linux-LLMs) | FastFlowLM 0.9.35 native Linux, needs Lemonade 10.0 and Linux 7.0 or backports; targets Ryzen AI 300/400 | unverified | PLAN §4 |
 | 2026-10-14 | [FastFlowLM](https://github.com/shdu-amd/FastFlowLM) | README lists vision, audio, embedding and MoE support on Ryzen AI NPUs (XDNA2) | unverified | T4.1 |
+| 2026-10-15 | [drakosha/whisper-xdna](https://github.com/drakosha/whisper-xdna) | Whisper encoder on XDNA1, MIT. **Reproduced here** (tiny, base, small): same transcription, cosine >= 0.9998; slower and more energy than the CPU at these sizes (`bench/WHISPER_XDNA.md`). The on-NPU GELU/softmax kernels did not build on mlir-aie 1.4.4 | **reproduced here** (GEMM-on-NPU configuration) | T4.1, T4.2 |
 | 2026-10-14 | [Scottcjn/npu-linux-kit](https://github.com/Scottcjn/npu-linux-kit) | Community kit; webcam module listed as working, embeddings/audio/ggml as roadmap; single author | unverified | T4.2 |
 | 2026-10-14 | [mrtib/phoenix-npu1-iron-kernels](https://huggingface.co/mrtib/phoenix-npu1-iron-kernels) | int16 GEMM and bf16 add kernels for Phoenix NPU1, built with mlir-aie 1.3.2 on a Ryzen 7 7840HS; do not load on NPU2/4 | unverified | T4.2 |
 | 2026-10-14 | [arXiv 2512.13282](https://arxiv.org/pdf/2512.13282) | GEMM performance across Ryzen AI NPU generations using IRON | unverified | T4.1 |
@@ -41,6 +42,11 @@ First automatic scan (2026-10-14) found XDNA1-specific work that changes the pla
 - [FireBurn/ggml-xdna1](https://github.com/FireBurn/ggml-xdna1) and [c8dhjp4tyv-bit/hawkpoint-npu-llm](https://github.com/c8dhjp4tyv-bit/hawkpoint-npu-llm): ggml backend / LLM stack for XDNA1; compare decode speed against `bench/PERF.md`. **T4.2**.
 - [tibrezus/xdna-npu-toolkit](https://github.com/tibrezus/xdna-npu-toolkit) and [michael-greider/xdna-stat](https://github.com/michael-greider/xdna-stat): detection and monitoring tools; candidates for the NPU indicator in the desktop client (**T2.1**).
 - [amd/xdna-driver](https://github.com/amd/xdna-driver): official driver and XRT SHIM, watch releases for `npu1` regressions (**T0.1**).
+
+## Read in the clones, not reproduced (2026-10-15) / Leídos, sin reproducir
+- [hnws/xdna1-npu-lab](https://github.com/hnws/xdna1-npu-lab) (Apache-2.0): reports Frigate object detection on XDNA1, YOLO-NAS-L int8 at 18.8 ms and 0.11 J per detection against 1.86 J on the CPU, using AMD's proprietary Vitis AI runtime (Ryzen AI 1.7.1). Also reports Qwen2.5-0.5B at 2.5 tok/s on the NPU and that the iGPU beats the NPU for LLMs. **Not reproduced**: needs the proprietary runtime; the most interesting lead for a low-power, always-on use.
+- [FireBurn/ggml-xdna1](https://github.com/FireBurn/ggml-xdna1) (MIT): ggml backend; prefill 1.04x to 1.41x faster than llama.cpp CPU, decode deliberately left on the CPU (reports ~13.5 GB/s through the NPU DMA). Consistent with our DMA-bound finding. Not reproduced.
+- [c8dhjp4tyv-bit/hawkpoint-npu-llm](https://github.com/c8dhjp4tyv-bit/hawkpoint-npu-llm): an LLM stack (Ollama, Qwen) for XDNA1/CPU/GPU; its own `BENCHMARKS.md` says no controlled numbers exist yet ("this repository does not invent benchmark data"). Nothing to reproduce.
 
 ## Automatic scan / Escaneo automático
 <!-- research_scan:begin -->
