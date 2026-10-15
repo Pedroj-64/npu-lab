@@ -1,0 +1,2 @@
+{"ts": "2026-10-15T08:40:09", "model": "models/qwen3s", "decode": 20.49, "prefill_256": 240.71, "ttft_ms": 391.47, "kernel": "7.2.10-1-cachyos", "ac": "1", "governor": "performance", "gpu_pstate": "P8", "commit": "cebdc1d", "regression": false}
+{"ts": "2026-10-15T08:40:26", "model": "models/qwen3s", "decode": 20.42, "prefill_256": 241.42, "ttft_ms": 393.06, "kernel": "7.2.10-1-cachyos", "ac": "1", "governor": "performance", "gpu_pstate": "P8", "commit": "cebdc1d", "regression": false}

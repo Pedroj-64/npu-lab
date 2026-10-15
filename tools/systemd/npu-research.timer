@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the npu-lab research scan weekly
+
+[Timer]
+OnCalendar=Sat 10:00
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target

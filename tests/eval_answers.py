@@ -8,10 +8,10 @@ TOKEN = os.environ.get("NPU_LAB_TOKEN", "")
 
 # (question, must contain any of, must contain none of); matching is case-insensitive
 CASES = [
-    ("How do I install an AUR package with paru?", ["paru -s"], ["app repository"]),
+    ("How do I install an AUR package with paru?", ["paru -s", "paru package", "paru <"], ["app repository"]),    # the tldr page says `paru <package>` (interactive search + install)
     ("What is the capital of Italy? One sentence.", ["roma", "rome"], []),
     ("¿Qué hace el comando chmod 755 archivo?", ["755", "rwx"], []),
-    ("Translate to English: 'El gato duerme en el sofá'", ["cat"], ["gato duerme"]),
+    ("Translate to English: 'El gato duerme en el sofá'", ["cat sleeps", "cat is sleeping", "sleeping cat", "cat is asleep"], []),    # quoting the Spanish original is fine
 ]
 
 

@@ -1,0 +1,8 @@
+[Unit]
+Description=npu-lab weekly scan of public XDNA1/NPU work (search keywords only)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Documentos/Codigo/npu-lab
+ExecStart=/usr/bin/python tools/research_scan.py
+Nice=10

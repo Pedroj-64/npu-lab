@@ -23,7 +23,7 @@ cliente (web/index.html, launcher, app Tauri, VS Code por /v1, puente al celular
 ## Endpoints del servidor (`src/serve.py`, `[leído en código]`)
 GET: `/status`, `/v1/models`, `/routing`, `/documents`, `/rules`, `/facts`, `/chats`, `/doctor`, `/settings`.
 POST: `/login`, `/mode`, `/profile`, `/rules`, `/documents/upload`, `/documents/delete`, `/agent/run` (una acción; solo escribe con `confirm=true`), `/project/apply`, `/facts`, `/chats/save`, `/chats/load`, `/routing`, `/settings`, `/settings/models`, `/settings/test_web`, `/chat`, `/v1/chat/completions`, `/search`, `/index`, `/index/stop`.
-Previstos (ver `PLAN.es.md`): `POST /project/graph`, `GET /project/graph/query`.
+Mapa del proyecto (`src/graph.py`, graphify, solo código): `GET /project/graph` (estado), `POST /project/graph` (construir o refrescar en segundo plano), `POST /project/graph/query` (`{q, budget}`).
 
 ## Datos en disco
 | Ruta | Contenido |
@@ -37,7 +37,7 @@ Previstos (ver `PLAN.es.md`): `POST /project/graph`, `GET /project/graph/query`.
 
 ## Componentes previstos
 ```
-sentinel.py  --eventos (git status, archivos nuevos, trabajos largos)--> clasificador decide.py
+sentinel.py (hoy: solo git status/ahead, sin modelo)  --eventos (git status, archivos nuevos, trabajos largos)--> clasificador decide.py
       |                                                                   | pregunta solo si hace falta
       +--notify-send / panel de la UI <---------------- modelo pequeño (NPU)
 

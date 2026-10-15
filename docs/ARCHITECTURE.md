@@ -23,7 +23,7 @@ client (web/index.html, launcher, Tauri app, VS Code via /v1, phone bridge)
 ## Server endpoints (`src/serve.py`, `[read in code]`)
 GET: `/status`, `/v1/models`, `/routing`, `/documents`, `/rules`, `/facts`, `/chats`, `/doctor`, `/settings`.
 POST: `/login`, `/mode`, `/profile`, `/rules`, `/documents/upload`, `/documents/delete`, `/agent/run` (one action; writes only with `confirm=true`), `/project/apply`, `/facts`, `/chats/save`, `/chats/load`, `/routing`, `/settings`, `/settings/models`, `/settings/test_web`, `/chat`, `/v1/chat/completions`, `/search`, `/index`, `/index/stop`.
-Planned (see `PLAN.md`): `POST /project/graph`, `GET /project/graph/query`.
+Project map (`src/graph.py`, graphify, code only): `GET /project/graph` (status), `POST /project/graph` (build or refresh in the background), `POST /project/graph/query` (`{q, budget}`).
 
 ## Data on disk
 | Path | Content |
@@ -37,7 +37,7 @@ Planned (see `PLAN.md`): `POST /project/graph`, `GET /project/graph/query`.
 
 ## Planned components
 ```
-sentinel.py  --events (git status, new files, long jobs)--> decide.py classifier
+sentinel.py (today: git status/ahead only, no model)  --events (git status, new files, long jobs)--> decide.py classifier
       |                                                         | asks only if needed
       +--notify-send / UI feed <---------------- small model (NPU)
 

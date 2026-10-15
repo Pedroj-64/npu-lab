@@ -141,3 +141,16 @@ powerprofilesctl set performance      # y enchufado
 Crudos de esta tanda: `bench/energy_runs.jsonl`.
 
 Tanda sana: `--model models/qwen35_2b --share {0,0.25,0.5} --runs 3`; `--model models/qwen3 --engine assisted --runs 3`; `--model models/qwen35_4b --share 0 --vram-gb 5.0 --runs 3`; `--model models/qwen3 --engine npu --runs 3`.
+
+
+## Línea base solo NPU, 15 oct 2026 (tarea T0.1) / NPU-only baseline
+Enchufado (AC=1), gobernador y perfil `performance`, kernel 7.2.10-1-cachyos, GPU en reposo (P8, ~4.5 W), NPU libre, 3 corridas por fase [medido]. Comando: `bench/energy.py --model models/<m> --engine npu --runs 3`. Crudos añadidos a `bench/energy_runs.jsonl`.
+
+| Modelo | Fase | tok/s | W totales (APU+GPU) | tokens/J | tokens/J netos |
+|---|---|---:|---:|---:|---:|
+| Qwen3-0.6B | decode | 18.49 ± 0.04 | 30.46 ± 2.68 | 0.61 ± 0.05 | 1.71 ± 0.41 |
+| Qwen3-0.6B | prefill 512 | 213.03 ± 0.81 | 30.48 ± 0.39 | 6.99 ± 0.06 | 18.92 ± 0.59 |
+| Qwen3-1.7B | decode | 9.19 ± 0.01 | 27.24 ± 0.48 | 0.34 ± 0.01 | 1.20 ± 0.08 |
+| Qwen3-1.7B | prefill 512 | 99.15 ± 1.70 | 28.18 ± 0.99 | 3.52 ± 0.17 | 11.64 ± 1.57 |
+
+Reposo con el modelo cargado: 19.2 W (0.6B) y 19.6 W (1.7B), de los que ~4.5 W son de la GPU inactiva. Con `bench/watch.py` (perf_baseline, NPU sola): decode 20.49 y 20.42 tok/s, prefill 256 de 240.7 y 241.4 tok/s, TTFT 391 ms. Cifras coherentes con `bench/PERF.md` (decode 19.83, prefill 187 a 256 tokens; el prefill salió ~28 % más rápido que entonces, causa sin investigar). **Conclusión para el plan:** el consumo marginal de la NPU sola es ~11 W sobre el reposo; la comparación contra CPU/GPU para tareas pequeñas queda para T3.1.

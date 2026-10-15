@@ -1,0 +1,10 @@
+[Unit]
+Description=npu-lab sentinel: tells you which git repos were left half done (git only, no model, no network)
+
+[Service]
+ExecStart=/usr/bin/python %h/Documentos/Codigo/npu-lab/src/sentinel.py --roots %h/Documentos/Codigo --every 1800
+Nice=15
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

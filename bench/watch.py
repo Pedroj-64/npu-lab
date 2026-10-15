@@ -69,7 +69,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="models/qwen3s")
     ap.add_argument("--threshold", type=float, default=0.10)
-    ap.add_argument("--simulate-drop", type=float, default=0.0, help="multiply measured numbers by (1 - x) to test the regression check")
+    ap.add_argument("--simulate-drop", type=float, default=0.0, help="multiply measured numbers by (1 - x) to test the regression check; nothing is written to history")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
@@ -86,8 +86,9 @@ def main():
     prev = last(a.model)
     row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "model": a.model, **res, **state()}
     row["regression"] = regression(res, prev, a.threshold)
-    with open(HIST, "a") as f:
-        f.write(json.dumps(row) + "\n")
+    if not a.simulate_drop:                                  # a simulated number must never become a baseline
+        with open(HIST, "a") as f:
+            f.write(json.dumps(row) + "\n")
     print(json.dumps(row))
     sys.exit(2 if row["regression"] else 0)
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=npu-lab weekly short benchmark (skips itself when the NPU is busy)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Documentos/Codigo/npu-lab
+ExecStart=%h/Documentos/Codigo/npu-lab/.venv/bin/python bench/watch.py --model models/qwen3s
+SuccessExitStatus=2 3
+Nice=10
