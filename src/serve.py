@@ -11,7 +11,7 @@ accepted if it is this server's own origin; no CORS headers; only whitelisted mo
 OpenAI-compatible (for editors, loaded model only): GET /v1/models   POST /v1/chat/completions (stream or not; no tools).
 API (JSON):  POST /login (one-time code -> token)   GET /status /rules /routing /documents /chats /facts /doctor /settings   POST /routing /facts /agent/run /project/apply /chats/save /chats/load /chats/delete /documents/upload /documents/delete /settings /settings/models /settings/test_web /mode /profile /rules /chat (ndjson stream) /search /index /index/stop
 """
-import gc, hmac, json, os, re, secrets, subprocess, sys, threading, time
+import itertools, gc, hmac, json, os, re, secrets, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -80,6 +80,64 @@ def share_of(model, rl):
     v = v.get(model) if isinstance(v, dict) else None
     return float(DEFAULT_SHARE.get(model, 0.0) if v is None else v)
 PROFILES = ("npu_only", "assisted")                           # assisted: GPU/CPU may help bulk indexing
+READ_TOOLS = ("read_file", "list_dir", "file_search", "grep_search", "view", "grep", "glob")                   # editor tools offered to the model over /v1 (chat agent and CLI-style agent names)
+WRITE_TOOLS = ("create_file", "replace_string_in_file", "create_directory", "create", "edit")                  # the editor asks the user before each write
+AGENT_TOOLS = READ_TOOLS + WRITE_TOOLS
+def fmt_call(name, args):
+    """Qwen's native tool format: raw values, nothing to escape (code with quotes and newlines breaks JSON in small models)."""
+    return f"<tool_call>\n<function={name}>\n" + "".join(f"<parameter={k}>\n{v if isinstance(v, str) else json.dumps(v)}\n</parameter>\n" for k, v in args.items()) + "</function>\n</tool_call>"
+
+
+ARG_ALIASES = {"filePath": ("path", "file_path", "filepath", "file", "filename"), "dirPath": ("path", "dir", "directory"), "path": ("filePath", "file_path", "dirPath", "dir"),
+               "oldString": ("old_string", "old_str", "old"), "newString": ("new_string", "new_str", "new"), "content": ("file_text", "text", "code", "contents")}
+ARG_DEFAULTS = {"startLine": 1, "endLine": 300, "explanation": "requested by the user"}
+
+
+def fix_args(args, tools_spec):
+    """Make the model's arguments match the tool schema: rename common aliases, drop unknown keys, fill defaults for plain required fields."""
+    props = (tools_spec.get("parameters") or {}).get("properties") or {}
+    if not props:
+        return args
+    out = {}
+    for k, v in args.items():
+        if k in props:
+            out[k] = v
+        else:
+            for real, alts in ARG_ALIASES.items():
+                if real in props and real not in args and k in alts:
+                    out[real] = v
+                    break
+    for k in (tools_spec.get("parameters") or {}).get("required") or []:
+        if k not in out and k in ARG_DEFAULTS:
+            out[k] = ARG_DEFAULTS[k]
+    return out
+
+
+def parse_call(out, tools):
+    """First tool call in the model's reply -> (name, args, start index of the call), or None. Accepts the XML form and, as a fallback, <tool_call>{json}</tool_call> (arguments nested or flat; trailing junk such as an extra brace is ignored)."""
+    m = re.search(r"<function=([\w.-]+)>([\s\S]*?)(</function>|</tool_call>|$)", out)
+    if m and m.group(1) in tools:
+        props = (tools[m.group(1)].get("parameters") or {}).get("properties") or {}
+        args = {}
+        for k, v in re.findall(r"<parameter=([\w.-]+)>\n?([\s\S]*?)\n?</parameter>", m.group(2)):
+            t = (props.get(k) or {}).get("type")
+            try:
+                args[k] = int(v) if t == "integer" else float(v) if t == "number" else json.loads(v) if t in ("boolean", "array", "object") else v
+            except ValueError:
+                args[k] = v
+        st = out.rfind("<tool_call>", 0, m.start() + 1)
+        return m.group(1), fix_args(args, tools[m.group(1)]), st if st >= 0 else m.start()
+    m = re.search(r"<tool_call>\s*(?=\{)", out)
+    if m:
+        try:
+            j, _ = json.JSONDecoder(strict=False).raw_decode(out, m.end())
+        except ValueError:
+            return None
+        if isinstance(j, dict) and j.get("name") in tools:
+            a = j.get("arguments")
+            return j["name"], fix_args(a if isinstance(a, dict) else {k: v for k, v in j.items() if k != "name"}, tools[j["name"]]), m.start()
+
+
 MAX_BODY, CHAT_BODY, MAX_TOKENS = 64 * 1024, 16 * 1024 * 1024, 4096     # a chat request may carry a whole long conversation or document
 DEFAULT_CONTEXT = 80000                                                    # tokens; the window actually used is cut to what fits in the GPU memory limit
 TOKEN = os.environ.get("NPU_LAB_TOKEN") or secrets.token_urlsafe(32)
@@ -425,6 +483,9 @@ class H(BaseHTTPRequestHandler):
         self._check_host()
         got = self.headers.get("Authorization", "")
         if not hmac.compare_digest(got.encode(), f"Bearer {TOKEN}".encode()):
+            if os.environ.get("NPU_LAB_DEBUG"):       # shape only, never the value
+                with open(os.environ["NPU_LAB_DEBUG"], "a") as f:
+                    f.write(json.dumps({"t": int(time.time()), "auth_fail": {"len": len(got), "starts": got[:7], "expected_len": len(TOKEN) + 7, "headers": sorted(k for k in self.headers.keys())}}) + "\n")
             raise Bad(401, "unauthorized")
 
     def _body(self, limit=MAX_BODY):
@@ -444,11 +505,18 @@ class H(BaseHTTPRequestHandler):
             self._auth()
             fn()
         except Bad as e:
+            self._dbg(e.code, e.msg)
             self._send(e.code, {"error": e.msg})
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as e:
+            self._dbg(500, f"{type(e).__name__}: {e}")
             self._send(500, {"error": f"{type(e).__name__}: {e}"})
+
+    def _dbg(self, code, msg):
+        if os.environ.get("NPU_LAB_DEBUG") and self.path.startswith("/v1"):
+            with open(os.environ["NPU_LAB_DEBUG"], "a") as f:
+                f.write(json.dumps({"t": int(time.time()), "error": code, "msg": str(msg)[:300]}) + "\n")
 
     def do_GET(self):
         if self.path in ("/", "/index.html"):
@@ -544,6 +612,12 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/settings":
             import settings
             self._send(200, settings.masked(settings.load()))
+        elif self.path == "/project/graph":      # state of the graphify map of the project folder
+            import graph, search
+            try:
+                self._send(200, graph.status(search.rules().get("project_root", "")))
+            except graph.GraphError as e:
+                raise Bad(400, str(e))
         else:
             raise Bad(404, "not found")
 
@@ -567,6 +641,16 @@ class H(BaseHTTPRequestHandler):
             except documents.DocError as e:
                 raise Bad(400, str(e))
             self._send(200, {"documents": documents.listing()})
+        elif self.path in ("/project/graph", "/project/graph/query"):      # graphify map: code only, no model, no network
+            import graph, search
+            root = search.rules().get("project_root", "")
+            try:
+                if self.path == "/project/graph":
+                    self._send(202, graph.start_update(root))
+                else:
+                    self._send(200, graph.query(root, d.get("q", ""), int(d.get("budget") or 1500)))
+            except (graph.GraphError, ValueError) as e:
+                raise Bad(400, str(e))
         elif self.path == "/agent/run":        # one action of the agent; anything that writes only runs with confirm=true (the page sends it after the user pressed OK)
             import agent, search
             root = search.rules().get("project_root", "")
@@ -773,22 +857,118 @@ class H(BaseHTTPRequestHandler):
 
     def _openai(self, d):
         """POST /v1/chat/completions (OpenAI format, stream or not) on the loaded local model: same engine, no routing/web/docs.
-        ponytail: ignores `tools` (the local model cannot call them: Copilot Ask mode works, Agent mode does not) and the `model` field (the loaded model answers)."""
+        With `tools`, a read-only "archaic agent": only AGENT_TOOLS are offered to the model, which asks for one with <tool_call>{json}</tool_call>; we turn that into
+        an OpenAI tool_call and the editor runs it and sends the result back. The editor's own (huge) system prompt is dropped in that mode.
+        ponytail: one call per reply, no parallel calls, text format instead of the model's native template; the `model` field is ignored (the loaded model answers)."""
         if S.mode != "llm":
             raise Bad(409, "not in llm mode: load a model first")
         text = lambda c: c if isinstance(c, str) else "".join(p.get("text", "") for p in c or [] if isinstance(p, dict))
-        msgs = [(m.get("role"), text(m.get("content"))) for m in d.get("messages") or [] if isinstance(m, dict)]
-        system = "\n\n".join(c for r, c in msgs if r in ("system", "developer") and c) or None
-        turns = [{"role": r, "content": c} for r, c in msgs if r in ("user", "assistant") and c]
+        cut = lambda t, n: t if len(t) <= n else t[:n // 4] + "\n[...]\n" + t[-3 * n // 4:]
+        tools = {f["name"]: f for t in d.get("tools") or [] if isinstance(t, dict) for f in [t.get("function") or {}] if f.get("name") in AGENT_TOOLS}
+        raw = [m for m in d.get("messages") or [] if isinstance(m, dict)]
+        if os.environ.get("NPU_LAB_DEBUG"):           # metadata only (no prompt text): what the editor really sends
+            with open(os.environ["NPU_LAB_DEBUG"], "a") as f:
+                f.write(json.dumps({"t": int(time.time()), "stream": d.get("stream"), "ntools": len(d.get("tools") or []), "names": [(t.get("function") or {}).get("name") for t in d.get("tools") or [] if isinstance(t, dict)], "offered": list(tools),
+                                    "msgs": [(m.get("role"), len(text(m.get("content"))), len(m.get("tool_calls") or [])) for m in raw]}) + "\n")
+        if tools:
+            names = {tc.get("id"): tc["function"]["name"] for m in raw for tc in m.get("tool_calls") or [] if tc.get("function")}
+            msgs = []
+            for m in raw:
+                r, c = m.get("role"), text(m.get("content"))
+                if r == "assistant" and m.get("tool_calls"):
+                    c += "\n".join(fmt_call(tc["function"]["name"], json.loads(tc["function"].get("arguments") or "{}")) for tc in m["tool_calls"][:1] if tc.get("function"))
+                elif r == "tool":
+                    r, c = "user", f'<tool_response name="{names.get(m.get("tool_call_id"), "?")}">\n{cut(c, 8000)}\n</tool_response>'
+                elif r == "user":
+                    c = cut(c, 14000)
+                msgs.append((r, c))
+            spec = "\n".join(f"- {n}({', '.join(k + ('*' if k in (f.get('parameters') or {}).get('required', []) else '') for k in (f.get('parameters') or {}).get('properties', {}))}): {(f.get('description') or '')[:160]}"
+                             for n, f in tools.items())
+            last_user = max((i for i, m in enumerate(raw) if m.get("role") == "user"), default=0)
+            final = sum(m.get("role") == "tool" for m in raw[last_user:]) >= 3     # 3 reads for one question is enough: force an answer (a 2B model loops otherwise)
+            ex = next(iter(tools)); exk = next(iter((tools[ex].get("parameters") or {}).get("properties") or {}), "path")
+            system = ("You are a coding assistant inside an editor and you CAN read and edit the user's project: never say you cannot access files. Your tools (* = required argument):\n" + spec +
+                      f'\n\nWhen you need a file or folder, reply with ONLY a call in this exact format and nothing else, e.g.\n{fmt_call(ex, {exk: "README.md"})}\n'
+                      "Values are written raw (no quotes or escaping), also file contents. "
+                      "The result comes back in a <tool_response> message. One tool per reply. Use a tool before answering about any file you have not seen. "
+                      "You can create and edit files ONLY inside the open workspace (use the workspace folder path shown in the editor context if a tool wants absolute paths; never '..'; the editor asks the user to confirm each change). You cannot run commands or delete. To create a file use create_file with the full content. "
+                      "Never repeat a tool call you already made. When you have what you need, answer in the user's language without a tool_call and do not invent contents.")
+            if final:
+                system += "\n\nNo more tool calls are allowed now: answer the user with what you already have."
+        else:
+            msgs = [(m.get("role"), text(m.get("content"))) for m in raw]
+            system = "\n\n".join(c for r, c in msgs if r in ("system", "developer") and c) or None
+        turns = []
+        for r, c in msgs:
+            if r in ("user", "assistant") and c:
+                if turns and turns[-1]["role"] == r:
+                    turns[-1]["content"] += "\n\n" + c
+                else:
+                    turns.append({"role": r, "content": c})
+        while tools and sum(len(t["content"]) for t in turns) > 36000 and len(turns) > 1:   # keep the newest turns that fit (~16k tokens of context)
+            turns.pop(0)
+            while turns and turns[0]["role"] != "user":
+                turns.pop(0)
         if not turns or turns[-1]["role"] != "user":
             raise Bad(400, "the last message must be from the user")
-        n = max(1, min(int(d.get("max_tokens") or d.get("max_completion_tokens") or 1024), MAX_TOKENS))
-        if not S.npu_lock.acquire(blocking=False):
+        n = max(1, min(int(d.get("max_tokens") or d.get("max_completion_tokens") or 1024), 1024))   # the editor's summaries ask for far more and would hold the NPU for minutes
+        if not S.npu_lock.acquire(timeout=300):      # the editor fires several requests at once (chat + title...): queue them instead of failing
             raise Bad(409, "busy")
         try:
             gen = S.engine.stream(turns[-1]["content"], n, None, turns[:-1], None, system=system)
             cid, name, t0 = "chatcmpl-" + secrets.token_hex(8), S.model, int(time.time())
             chunk = lambda delta, fin=None: {"id": cid, "object": "chat.completion.chunk", "created": t0, "model": name, "choices": [{"index": 0, "delta": delta, "finish_reason": fin}]}
+            if tools:                                   # collect the whole reply, then answer with text or one tool_call
+                def run(g):
+                    o = ""
+                    for piece in g:
+                        o += piece
+                        if "</tool_call>" in o or "</function>" in o:
+                            break
+                    return re.sub(r"<think>[\s\S]*?(</think>|$)", "", o).strip()
+                try:
+                    out = run(gen)
+                    pc = parse_call(out, tools)
+                    if not final and not pc and ("<tool_call>" in out or "<function=" in out):      # malformed call: one retry showing the exact format
+                        ex = next(iter(tools)); exk = next(iter((tools[ex].get("parameters") or {}).get("properties") or {}), "path")
+                        hint = f"That tool call could not be read. Reply again with ONLY a call in this exact format (raw values, nothing else):\n{fmt_call(ex, {exk: '...'})}"
+                        out = run(S.engine.stream(hint, n, None, turns + [{"role": "assistant", "content": out}], None, system=system))
+                        pc = parse_call(out, tools)
+                except ValueError as e:
+                    raise Bad(400, f"{e} (the prompt does not fit the loaded model's context)")
+                call, content = None, out
+                if final:
+                    content = re.sub(r"<tool_call>[\s\S]*", "", out).strip() or "(sin respuesta: el modelo no pudo contestar con lo que leyó)"
+                elif pc:
+                    nm, a, st = pc
+                    if not (nm in WRITE_TOOLS and any(".." in str(a.get(k) or "").replace("\\", "/").split("/") for k in ("filePath", "dirPath", "path", "file_path"))):
+                        call, content = {"id": "call_" + secrets.token_hex(8), "type": "function", "function": {"name": nm, "arguments": json.dumps(a)}}, out[:st].strip()
+                if os.environ.get("NPU_LAB_DEBUG"):
+                    with open(os.environ["NPU_LAB_DEBUG"], "a") as f:
+                        f.write(json.dumps({"t": int(time.time()), "reply_chars": len(out), "tool_call": call and call["function"]["name"]}) + "\n")
+                if d.get("stream"):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    ev = [chunk({"role": "assistant"})] + ([chunk({"content": content})] if content else []) + \
+                         ([chunk({"tool_calls": [{"index": 0, **call}]})] if call else []) + [chunk({}, "tool_calls" if call else "stop")]
+                    try:
+                        for o in ev:
+                            self.wfile.write(b"data: " + json.dumps(o).encode() + b"\n\n")
+                        self.wfile.write(b"data: [DONE]\n\n")
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+                else:
+                    self._send(200, {"id": cid, "object": "chat.completion", "created": t0, "model": name, "choices": [{"index": 0, "finish_reason": "tool_calls" if call else "stop",
+                                     "message": {"role": "assistant", "content": content or None, **({"tool_calls": [call]} if call else {})}}]})
+                return
+            try:
+                first = next(gen, "")                  # prompt too long etc. fail here, before the stream starts: a clean 400 instead of a broken stream
+            except ValueError as e:
+                raise Bad(400, f"{e} (the editor's prompt does not fit the loaded model's context; lower maxInputTokens or raise the context in Settings)")
+            gen = itertools.chain([first], gen)
             if d.get("stream"):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
