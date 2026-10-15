@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>npu-lab: private AI for the first-generation NPU</title>
+<meta name="description" content="A private AI assistant that runs small language models on the first-generation AMD XDNA1 NPU (Ryzen 7040/8040) on Linux. Semantic search, a project map, a sentinel for unfinished work. Everything stays on your PC.">
+<meta property="og:title" content="npu-lab: private AI for the first-generation NPU">
+<meta property="og:description" content="Small models on the AMD XDNA1 NPU, on Linux, with the numbers measured and the failures written down.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='7' y='7' width='18' height='18' rx='4' fill='none' stroke='%23e08a4f' stroke-width='2.4'/%3E%3Cpath d='M12 3v4M20 3v4M12 25v4M20 25v4M3 12h4M3 20h4M25 12h4M25 20h4' stroke='%23e08a4f' stroke-width='2.4' stroke-linecap='round'/%3E%3Crect x='12.5' y='12.5' width='7' height='7' rx='1.5' fill='%23e08a4f'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#12110d; --panel:#1b1a15; --panel2:#23211a; --line:#312e25; --text:#efebe0; --dim:#a29c8d; --acc:#e08a4f; --acc-ink:#1b1006; --ok:#8ac7a0;
+          --sans:"Outfit", ui-sans-serif, system-ui, sans-serif; --mono:ui-monospace, "JetBrains Mono", Menlo, monospace; --ease:cubic-bezier(.2,.7,.2,1); }
+  * { box-sizing:border-box; margin:0; }
+  html { scroll-behavior:smooth; }
+  html[data-lang="en"] [lang="es"], html[data-lang="es"] [lang="en"] { display:none !important; }
+  body { background:var(--bg); color:var(--text); font:400 18px/1.65 var(--sans); -webkit-font-smoothing:antialiased; text-wrap:pretty; }
+  main { overflow-x:hidden; width:100%; max-width:100%; }
+  a { color:inherit; }
+  :focus-visible { outline:2px solid var(--acc); outline-offset:3px; border-radius:6px; }
+  .skip { position:absolute; left:-999px; top:10px; background:var(--acc); color:var(--acc-ink); padding:8px 14px; border-radius:8px; z-index:50; } .skip:focus { left:10px; }
+  body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity:.05; z-index:60;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+
+  /* navigation: floating glass pill */
+  nav { position:fixed; top:18px; left:50%; transform:translateX(-50%); z-index:40; display:flex; align-items:center; gap:4px; padding:8px 8px 8px 18px; border-radius:999px;
+        background:color-mix(in srgb, var(--panel) 62%, transparent); backdrop-filter:blur(18px) saturate(140%); -webkit-backdrop-filter:blur(18px) saturate(140%);
+        box-shadow:0 0 0 1px rgba(255,255,255,.07), 0 18px 40px -18px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.08); max-width:calc(100vw - 24px); }
+  nav .logo { white-space:nowrap; display:flex; align-items:center; gap:9px; font-weight:600; letter-spacing:-.2px; margin-right:10px; text-decoration:none; }
+  nav .logo svg { width:22px; height:22px; color:var(--acc); }
+  nav a.l { font-size:15px; padding:8px 14px; border-radius:999px; text-decoration:none; color:var(--dim); transition:color .25s, background .25s; white-space:nowrap; } nav a.l:hover { color:var(--text); background:rgba(255,255,255,.06); }
+  nav .lang { font:500 13px var(--sans); background:none; border:0; color:var(--dim); cursor:pointer; padding:8px 10px; border-radius:999px; } nav .lang:hover { color:var(--text); }
+  nav a.gh { font-weight:500; font-size:15px; padding:9px 18px; border-radius:999px; background:var(--text); color:#12110d; text-decoration:none; transition:transform .2s var(--ease); } nav a.gh:hover { transform:translateY(-1px); }
+  @media (max-width:820px) { nav a.l { display:none; } }
+
+  section { position:relative; padding:clamp(88px, 13vw, 190px) clamp(20px, 5vw, 64px); }
+  .wrap { max-width:1240px; margin:0 auto; }
+
+  /* attention: cinematic centre */
+  .hero { position:relative; min-height:100dvh; display:grid; place-items:center; text-align:center; padding-top:150px; overflow:hidden;
+          background:radial-gradient(ellipse 70% 55% at 50% 38%, rgba(224,138,79,.20), transparent 70%), radial-gradient(ellipse 60% 40% at 80% 90%, rgba(138,199,160,.07), transparent 70%); }
+  .hero .chipart { position:absolute; width:min(88vw, 820px); aspect-ratio:1; left:50%; top:50%; transform:translate(-50%,-46%); color:var(--acc); opacity:.13; pointer-events:none; }
+  .hero h1 { position:relative; font-weight:600; font-size:clamp(2.6rem, 5.2vw, 5.2rem); line-height:1.04; letter-spacing:-.035em; max-width:72rem; margin:0 auto; text-wrap:balance; }
+  .hero h1 em { font-style:normal; color:var(--acc); }
+  .pill-inline { display:inline-block; width:1.9em; height:.72em; border-radius:999px; vertical-align:-.06em; margin:0 .12em; background:conic-gradient(from 210deg at 50% 50%, #e08a4f, #8ac7a0, #e08a4f); box-shadow:inset 0 0 0 2px rgba(255,255,255,.14); }
+  .hero p.sub { position:relative; max-width:44rem; margin:30px auto 0; color:var(--dim); font-size:clamp(1.05rem, 1.5vw, 1.3rem); }
+  .cta { position:relative; display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin-top:44px; }
+  .btn { display:inline-flex; align-items:center; gap:10px; padding:16px 30px; border-radius:999px; font:500 17px var(--sans); text-decoration:none; transition:transform .25s var(--ease), background .25s; }
+  .btn:hover { transform:translateY(-2px); }
+  .btn.pri { background:var(--acc); color:var(--acc-ink); }
+  .btn.sec { background:rgba(255,255,255,.06); color:var(--text); box-shadow:inset 0 0 0 1px rgba(255,255,255,.16); }
+  .btn.light { background:var(--text); color:#12110d; }
+
+  h2 { font-weight:600; font-size:clamp(2.1rem, 4vw, 3.9rem); line-height:1.07; letter-spacing:-.03em; max-width:60rem; text-wrap:balance; }
+  .lead { color:var(--dim); max-width:42rem; margin-top:22px; }
+
+  /* interest: gapless bento (4 x 2 = 8 cells: 2x2 + 2x1 + 1x1 + 1x1) */
+  .bento { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); grid-template-rows:repeat(2, minmax(250px, auto)); grid-auto-flow:dense; gap:16px; margin-top:64px; }
+  .card { position:relative; overflow:hidden; border-radius:28px; padding:30px; background:var(--panel); box-shadow:inset 0 0 0 1px var(--line); display:flex; flex-direction:column; justify-content:flex-end; isolation:isolate; transition:transform .7s var(--ease), box-shadow .5s; }
+  .card:hover { transform:translateY(-4px); box-shadow:inset 0 0 0 1px rgba(224,138,79,.45); }
+  .card h3 { font-weight:600; font-size:1.55rem; letter-spacing:-.02em; line-height:1.15; }
+  .card p { color:var(--dim); margin-top:10px; font-size:16px; line-height:1.55; max-width:34rem; }
+  .card .vis { position:absolute; inset:0; z-index:-1; transition:transform .9s var(--ease); } .card:hover .vis { transform:scale(1.05); }
+  .c-search { grid-column:span 2; grid-row:span 2; background:radial-gradient(ellipse 80% 60% at 70% 20%, rgba(224,138,79,.22), transparent 65%), var(--panel); }
+  .c-search h3 { font-size:clamp(1.9rem, 3vw, 2.6rem); }
+  .c-map { grid-column:span 2; background:linear-gradient(140deg, var(--panel2), var(--panel)); }
+  .c-sent { background:var(--panel); } .c-desk { background:var(--panel2); }
+  .bars { position:absolute; left:30px; right:30px; top:30px; display:grid; gap:10px; }
+  .bars i { display:block; height:12px; border-radius:99px; background:linear-gradient(90deg, var(--acc), rgba(224,138,79,.25)); }
+  .nodes svg { position:absolute; right:-8px; top:0; width:50%; height:100%; opacity:.6; }
+  .c-map h3, .c-map p { max-width:50%; }
+  @media (max-width:900px) { .bento { grid-template-columns:repeat(2, minmax(0,1fr)); grid-template-rows:none; } .c-search { grid-column:span 2; grid-row:span 1; min-height:380px; } .c-map { grid-column:span 2; } }
+  @media (max-width:900px) { .c-search .vis { position:relative; inset:auto; z-index:0; margin-bottom:auto; padding-bottom:26px; } .bars { position:static; } .card { justify-content:flex-start; } .c-search { justify-content:space-between; } }
+  @media (max-width:700px) { .c-map h3, .c-map p { max-width:100%; } .nodes svg { opacity:.22; width:100%; } }
+  @media (max-width:560px) { .bento { grid-template-columns:1fr; } .c-search, .c-map { grid-column:span 1; } .card { min-height:230px; } }
+
+  /* desire: scrubbed statement, pinned split, horizontal accordion */
+  .statement { font-weight:500; font-size:clamp(1.9rem, 4.2vw, 4rem); line-height:1.16; letter-spacing:-.03em; max-width:62rem; margin:0 auto; text-align:center; }
+  .statement span { opacity:.12; }
+  .split { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr); gap:clamp(30px, 6vw, 100px); }
+  .split .left { position:sticky; top:20vh; align-self:start; }
+  .facts { display:grid; gap:18px; }
+  .fact { padding:34px; border-radius:26px; background:var(--panel); box-shadow:inset 0 0 0 1px var(--line); }
+  .fact b { display:block; font-weight:600; font-size:clamp(2.2rem, 4vw, 3.4rem); letter-spacing:-.03em; color:var(--acc); font-variant-numeric:tabular-nums; line-height:1.05; }
+  .fact span { display:block; margin-top:10px; color:var(--dim); font-size:16px; }
+  .fact a { color:var(--text); text-underline-offset:4px; }
+  @media (max-width:860px) { .split { grid-template-columns:1fr; } .split .left { position:static; } }
+
+  .acc { display:flex; gap:12px; margin-top:56px; height:min(520px, 70vh); }
+  .acc .slice { flex:1; min-width:64px; border-radius:26px; padding:28px; background:var(--panel); box-shadow:inset 0 0 0 1px var(--line); overflow:hidden; cursor:pointer; position:relative; transition:flex .8s var(--ease), background .5s; }
+  .acc .slice h3 { font-weight:600; font-size:1.35rem; letter-spacing:-.02em; white-space:nowrap; }
+  .acc .slice p { color:var(--dim); margin-top:14px; opacity:0; transform:translateY(10px); transition:opacity .5s .15s, transform .6s .1s var(--ease); max-width:28rem; font-size:16px; }
+  .acc .slice .no { position:absolute; bottom:22px; left:28px; font:500 13px var(--mono); color:var(--dim); }
+  .acc .slice.on { flex:5; background:linear-gradient(160deg, rgba(224,138,79,.16), var(--panel) 60%); } .acc .slice.on p { opacity:1; transform:none; }
+  @media (max-width:860px) { .acc { flex-direction:column; height:auto; } .acc .slice { min-height:90px; } .acc .slice.on { min-height:260px; } .acc .slice .no { display:none; } }
+
+  /* compatibility */
+  table { width:100%; border-collapse:collapse; margin-top:48px; font-size:17px; }
+  th, td { text-align:left; padding:20px 18px; border-bottom:1px solid var(--line); vertical-align:top; } th { font-weight:500; color:var(--dim); font-size:14px; letter-spacing:.02em; }
+  td.yes { color:var(--ok); font-weight:500; } td.no { color:#e58a77; font-weight:500; } td.maybe { color:#dcb25c; font-weight:500; }
+  td small { display:block; color:var(--dim); margin-top:4px; font-size:14.5px; }
+  .code { margin-top:40px; padding:26px 28px; border-radius:22px; background:#0d0c09; box-shadow:inset 0 0 0 1px var(--line); font:15px/1.8 var(--mono); overflow-x:auto; color:#e7e2d5; white-space:pre; }
+  .code .c { color:var(--dim); }
+  @media (max-width:700px) { table, thead, tbody, tr, th, td { display:block; } thead { display:none; } td { border:0; padding:6px 0; } tr { padding:18px 0; border-bottom:1px solid var(--line); } }
+
+  /* marquee of what it is built on (real components only) */
+  .marquee { overflow:hidden; border-block:1px solid var(--line); padding:34px 0; }
+  .track { display:flex; gap:64px; width:max-content; animation:run 38s linear infinite; }
+  .track span { font-weight:500; font-size:clamp(1.6rem, 3vw, 2.6rem); letter-spacing:-.02em; color:var(--dim); white-space:nowrap; }
+  @keyframes run { to { transform:translateX(-50%); } }
+
+  /* action */
+  .final { text-align:center; background:radial-gradient(ellipse 60% 70% at 50% 100%, rgba(224,138,79,.18), transparent 70%); }
+  .final h2 { margin:0 auto; }
+  footer { padding:46px clamp(20px, 5vw, 64px) 60px; color:var(--dim); font-size:15.5px; }
+  footer .wrap { display:flex; flex-wrap:wrap; gap:18px 40px; justify-content:space-between; }
+  footer a { text-underline-offset:4px; } footer a:hover { color:var(--text); }
+
+  @media (prefers-reduced-motion: reduce) { .track { animation:none; } *, *::before, *::after { transition:none !important; scroll-behavior:auto !important; } .statement span { opacity:1; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#content"><span lang="en">Skip to content</span><span lang="es">Saltar al contenido</span></a>
+
+<nav aria-label="Main">
+  <a class="logo" href="#top"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="7" y="7" width="18" height="18" rx="4"/><path d="M12 3v4M20 3v4M12 25v4M20 25v4M3 12h4M3 20h4M25 12h4M25 20h4"/><rect x="12.5" y="12.5" width="7" height="7" rx="1.5" fill="currentColor" stroke="none"/></svg>npu-lab</a>
+  <a class="l" href="#what"><span lang="en">What it does</span><span lang="es">Qué hace</span></a>
+  <a class="l" href="#why"><span lang="en">The numbers</span><span lang="es">Las cifras</span></a>
+  <a class="l" href="#works"><span lang="en">Does it run on mine?</span><span lang="es">¿Corre en la mía?</span></a>
+  <button class="lang" id="lang" aria-label="Change language"><span lang="en">ES</span><span lang="es">EN</span></button>
+  <a class="gh" href="https://github.com/Pedroj-64/npu-lab"><span lang="en">GitHub</span><span lang="es">GitHub</span></a>
+</nav>
+
+<main id="top">
+<header class="hero" id="content">
+  <svg class="chipart" viewBox="0 0 400 400" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><rect x="110" y="110" width="180" height="180" rx="34"/><rect x="160" y="160" width="80" height="80" rx="14" fill="currentColor" stroke="none"/><path d="M150 40v70M200 40v70M250 40v70M150 290v70M200 290v70M250 290v70M40 150h70M40 200h70M40 250h70M290 150h70M290 200h70M290 250h70"/></svg>
+  <div class="wrap">
+    <h1 lang="en">A private AI assistant for the <span class="pill-inline" aria-hidden="true"></span> <em>NPU nobody supports</em></h1>
+    <h1 lang="es">Un asistente de IA privado para la <span class="pill-inline" aria-hidden="true"></span> <em>NPU que nadie soporta</em></h1>
+    <p class="sub" lang="en">Small language models, semantic search and a project map running on the first-generation AMD XDNA1 NPU (Ryzen 7040 and 8040), on Linux. Slower than a GPU, cheap to leave on, and nothing leaves your PC.</p>
+    <p class="sub" lang="es">Modelos de lenguaje pequeños, búsqueda semántica y un mapa de proyecto corriendo en la NPU AMD XDNA1 de primera generación (Ryzen 7040 y 8040), en Linux. Más lenta que una GPU, barata de dejar encendida, y nada sale de tu PC.</p>
+    <div class="cta">
+      <a class="btn pri" href="https://github.com/Pedroj-64/npu-lab"><span lang="en">Get it on GitHub</span><span lang="es">Descárgalo en GitHub</span></a>
+      <a class="btn sec" href="#works"><span lang="en">Does my chip work?</span><span lang="es">¿Funciona mi chip?</span></a>
+    </div>
+  </div>
+</header>
+
+<section id="what">
+  <div class="wrap">
+    <h2 lang="en">Four jobs a small model does well, without waking the GPU</h2>
+    <h2 lang="es">Cuatro trabajos que un modelo pequeño hace bien, sin despertar la GPU</h2>
+    <div class="bento">
+      <article class="card c-search"><div class="vis"><div class="bars"><i style="width:92%"></i><i style="width:74%"></i><i style="width:58%"></i><i style="width:41%"></i><i style="width:27%"></i></div></div>
+        <h3 lang="en">Search your files by meaning</h3><h3 lang="es">Busca tus archivos por significado</h3>
+        <p lang="en">Ask in your own words, in English or Spanish. The embeddings run on the NPU, the index stays on disk, and a measured gate keeps unrelated man pages out of the answer: irrelevant excerpts on held-out questions fell from 8 of 13 to 2 of 13. <a href="https://github.com/Pedroj-64/npu-lab/blob/master/docs/DECISIONS.md" style="color:var(--text)">Numbers</a></p>
+        <p lang="es">Pregunta con tus palabras, en inglés o en español. Los embeddings corren en la NPU, el índice se queda en el disco, y una puerta medida evita páginas de manual que no vienen al caso: en preguntas reservadas bajó de 8 de 13 a 2 de 13. <a href="https://github.com/Pedroj-64/npu-lab/blob/master/docs/DECISIONS.md" style="color:var(--text)">Cifras</a></p></article>
+      <article class="card c-map"><div class="vis nodes"><svg viewBox="0 0 400 200" fill="none" stroke="#e08a4f" stroke-width="1.5" aria-hidden="true"><g opacity=".55"><path d="M60 60L150 110L250 50L340 120M150 110L200 170L300 150M250 50L300 150M60 60L90 150L200 170"/></g><g fill="#12110d"><circle cx="60" cy="60" r="9"/><circle cx="150" cy="110" r="12"/><circle cx="250" cy="50" r="9"/><circle cx="340" cy="120" r="11"/><circle cx="200" cy="170" r="9"/><circle cx="300" cy="150" r="10"/><circle cx="90" cy="150" r="7"/></g></svg></div>
+        <h3 lang="en">A map of your code that costs no tokens</h3><h3 lang="es">Un mapa de tu código que no gasta tokens</h3>
+        <p lang="en">A graph of files, functions and imports built without a model or a network. A typical answer is about 1,200 tokens instead of 12,000 to 37,000 for the files it points at. It finds where something is defined 94 percent of the time; it does not find usages in Dart. <a href="https://github.com/Pedroj-64/npu-lab/blob/master/bench/GRAPH_TOKENS.md" style="color:var(--text)">Report</a></p>
+        <p lang="es">Un grafo de archivos, funciones e imports sin modelo ni red. Una respuesta típica son unos 1 200 tokens en vez de 12 000 a 37 000 de los archivos que señala. Encuentra dónde se define algo el 94 por ciento de las veces; no encuentra usos en Dart. <a href="https://github.com/Pedroj-64/npu-lab/blob/master/bench/GRAPH_TOKENS.md" style="color:var(--text)">Informe</a></p></article>
+      <article class="card c-sent"><h3 lang="en">A sentinel for loose ends</h3><h3 lang="es">Un centinela de cosas a medias</h3>
+        <p lang="en">Tells you which repos have uncommitted or unpushed work. Git only.</p><p lang="es">Te avisa qué repos tienen trabajo sin commitear o sin subir. Solo git.</p></article>
+      <article class="card c-desk"><h3 lang="en">A native window</h3><h3 lang="es">Una ventana nativa</h3>
+        <p lang="en">Tauri, no Electron. Close it and the NPU is free.</p><p lang="es">Tauri, sin Electron. Ciérrala y la NPU queda libre.</p></article>
+    </div>
+  </div>
+</section>
+
+<section aria-label="Statement">
+  <p class="statement" id="statement" lang="en">It is slower than a graphics card. It is also the one chip in your laptop that can stay awake all day without a fan noticing.</p>
+  <p class="statement" id="statement-es" lang="es">Es más lenta que una tarjeta gráfica. También es el único chip de tu portátil que puede estar despierto todo el día sin que el ventilador lo note.</p>
+</section>
+
+<section id="why">
+  <div class="wrap split">
+    <div class="left">
+      <h2 lang="en">The numbers, measured here</h2><h2 lang="es">Las cifras, medidas aquí</h2>
+      <p class="lead" lang="en">Ryzen 5 8645HS, plugged in, the NPU alone, three runs each. Every figure links to the report it came from, including the ideas that did not work.</p>
+      <p class="lead" lang="es">Ryzen 5 8645HS, enchufado, solo la NPU, tres corridas cada una. Cada cifra enlaza al informe del que salió, incluidas las ideas que no funcionaron.</p>
+    </div>
+    <div class="facts">
+      <div class="fact"><b>18.5 tok/s</b><span lang="en">Qwen3-0.6B decoding on the NPU, at about 30 W for the whole machine. Qwen3-1.7B: 9.2 tok/s. <a href="https://github.com/Pedroj-64/npu-lab/blob/master/bench/ENERGY.md">Energy report</a></span><span lang="es">Qwen3-0.6B generando en la NPU, a unos 30 W de toda la máquina. Qwen3-1.7B: 9.2 tok/s. <a href="https://github.com/Pedroj-64/npu-lab/blob/master/bench/ENERGY.md">Informe de energía</a></span></div>
+      <div class="fact"><b>22 GB/s</b><span lang="en">The memory read rate that caps decoding on this chip. More compute would not help; fewer bytes per token would. <a href="https://github.com/Pedroj-64/npu-lab/blob/master/bench/DMA_READ.md">How it was measured</a></span><span lang="es">La velocidad de lectura de memoria que limita la generación en este chip. Más cálculo no ayudaría; menos bytes por token sí. <a href="https://github.com/Pedroj-64/npu-lab/blob/master/bench/DMA_READ.md">Cómo se midió</a></span></div>
+      <div class="fact"><b lang="en">Rejected</b><b lang="es">Descartado</b><span lang="en">Four-bit weights lost too much quality, speculative decoding does not fit the kernel, and a cross-encoder reranker gained +0.013 where +0.05 was needed. <a href="https://github.com/Pedroj-64/npu-lab/blob/master/docs/DECISIONS.md">The list, with numbers</a></span><span lang="es">Los pesos de cuatro bits perdían demasiada calidad, la decodificación especulativa no cabe en el kernel y un reranker cross-encoder ganó +0.013 donde hacían falta +0.05. <a href="https://github.com/Pedroj-64/npu-lab/blob/master/docs/DECISIONS.md">La lista, con cifras</a></span></div>
+      <div class="fact"><b>0 bytes</b><span lang="en">of your files or conversations leave the machine. The research scan sends search keywords only, and cloud models are opt-in, per message.</span><span lang="es">de tus archivos o conversaciones salen de la máquina. El escaneo de investigación solo envía palabras de búsqueda, y los modelos en la nube son opcionales, por mensaje.</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 lang="en">Where it is going</h2><h2 lang="es">Hacia dónde va</h2>
+    <div class="acc" id="acc">
+      <div class="slice on" tabindex="0"><h3 lang="en">Always on</h3><h3 lang="es">Siempre activo</h3><p lang="en">The sentinel and the weekly benchmark already run as user services. Next: classify events with the small model and answer on request.</p><p lang="es">El centinela y el benchmark semanal ya corren como servicios de usuario. Siguiente: clasificar eventos con el modelo pequeño y responder bajo petición.</p><span class="no">01</span></div>
+      <div class="slice" tabindex="0"><h3 lang="en">From your phone</h3><h3 lang="es">Desde el celular</h3><p lang="en">A Telegram bot with an allow-list that talks to your PC. The PC stays the server; nothing is exposed without authentication.</p><p lang="es">Un bot de Telegram con lista blanca que habla con tu PC. El PC sigue siendo el servidor; nada se expone sin autenticación.</p><span class="no">02</span></div>
+      <div class="slice" tabindex="0"><h3 lang="en">Voice</h3><h3 lang="es">Voz</h3><p lang="en">Whisper on the first-generation NPU. A community port exists; it still has to be reproduced here before anything is promised.</p><p lang="es">Whisper en la NPU de primera generación. Existe un port de la comunidad; falta reproducirlo aquí antes de prometer nada.</p><span class="no">03</span></div>
+      <div class="slice" tabindex="0"><h3 lang="en">Other chips</h3><h3 lang="es">Otros chips</h3><p lang="en">The kernels target npu1. XDNA2 owners are welcome to test and report.</p><p lang="es">Los kernels apuntan a npu1. Quien tenga XDNA2 puede probar y reportar.</p><span class="no">04</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="works">
+  <div class="wrap">
+    <h2 lang="en">Does it run on your machine?</h2><h2 lang="es">¿Corre en tu máquina?</h2>
+    <table>
+      <thead><tr><th lang="en">Your hardware</th><th lang="es">Tu hardware</th><th lang="en">Status</th><th lang="es">Estado</th></tr></thead>
+      <tbody>
+        <tr><td>Ryzen 7040 / 8040 (XDNA1)<small lang="en">Phoenix and Hawk Point, PCI 1022:1502</small><small lang="es">Phoenix y Hawk Point, PCI 1022:1502</small></td><td class="yes"><span lang="en">Works</span><span lang="es">Funciona</span><small lang="en">Tested on a Ryzen 5 8645HS with Linux, the amdxdna driver and XRT.</small><small lang="es">Probado en un Ryzen 5 8645HS con Linux, el driver amdxdna y XRT.</small></td></tr>
+        <tr><td>Ryzen AI 300 (XDNA2)</td><td class="maybe"><span lang="en">Not tested</span><span lang="es">Sin probar</span><small lang="en">The kernels target npu1. Reports welcome.</small><small lang="es">Los kernels apuntan a npu1. Se agradecen reportes.</small></td></tr>
+        <tr><td>Windows</td><td class="no"><span lang="en">Not supported yet</span><span lang="es">Aún no soportado</span><small lang="en">The NPU is driven by a different stack there.</small><small lang="es">Allí la NPU se maneja con otra pila.</small></td></tr>
+        <tr><td>NVIDIA GPU</td><td class="yes"><span lang="en">Optional</span><span lang="es">Opcional</span><small lang="en">It can read long prompts faster. The NPU-only profile never touches it.</small><small lang="es">Puede leer prompts largos más rápido. El perfil solo NPU nunca la toca.</small></td></tr>
+      </tbody>
+    </table>
+    <pre class="code"><span class="c"># Linux with the amdxdna driver and XRT installed / Linux con el driver amdxdna y XRT</span>
+git clone https://github.com/Pedroj-64/npu-lab && cd npu-lab
+cd launcher &amp;&amp; cargo build --release &amp;&amp; cd ..
+./launcher/target/release/npu          <span class="c"># opens the page / abre la página</span></pre>
+  </div>
+</section>
+
+<div class="marquee" aria-label="Built on"><div class="track" aria-hidden="true">
+  <span>mlir-aie</span><span>XRT</span><span>Qwen3</span><span>MiniLM</span><span>graphify</span><span>Tauri</span><span>Python</span><span>Rust</span>
+  <span>mlir-aie</span><span>XRT</span><span>Qwen3</span><span>MiniLM</span><span>graphify</span><span>Tauri</span><span>Python</span><span>Rust</span>
+</div></div>
+
+<section class="final">
+  <div class="wrap">
+    <h2 lang="en">Own a first-generation NPU? Help it become useful.</h2><h2 lang="es">¿Tienes una NPU de primera generación? Ayúdala a ser útil.</h2>
+    <p class="lead" style="margin-left:auto;margin-right:auto" lang="en">The most useful contribution is a measurement from your machine, good or bad.</p>
+    <p class="lead" style="margin-left:auto;margin-right:auto" lang="es">La contribución más útil es una medición de tu máquina, buena o mala.</p>
+    <div class="cta"><a class="btn light" href="https://github.com/Pedroj-64/npu-lab"><span lang="en">Open the repository</span><span lang="es">Abrir el repositorio</span></a>
+      <a class="btn sec" href="https://github.com/Pedroj-64/npu-lab/blob/master/CONTRIBUTING.md"><span lang="en">How to contribute</span><span lang="es">Cómo contribuir</span></a></div>
+  </div>
+</section>
+</main>
+
+<footer><div class="wrap">
+  <span lang="en">MIT license. Kernels adapted from mlir-aie keep their Apache-2.0 headers.</span><span lang="es">Licencia MIT. Los kernels adaptados de mlir-aie conservan sus cabeceras Apache-2.0.</span>
+  <span><a href="https://github.com/Pedroj-64/npu-lab/blob/master/docs/PLAN.md">Plan</a> · <a href="https://github.com/Pedroj-64/npu-lab/blob/master/docs/RESEARCH_LOG.md">Research log</a> · <a href="https://github.com/Pedroj-64/npu-lab/blob/master/SECURITY.md">Security</a></span>
+</div></footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script>
+(function () {
+  var html = document.documentElement, KEY = "npu-lab-lang";
+  function setLang(l) { html.dataset.lang = l; html.lang = l; try { localStorage.setItem(KEY, l); } catch (e) {} }
+  var saved = null; try { saved = localStorage.getItem(KEY); } catch (e) {}
+  setLang(saved || ((navigator.language || "en").toLowerCase().indexOf("es") === 0 ? "es" : "en"));
+  document.getElementById("lang").addEventListener("click", function () { setLang(html.dataset.lang === "en" ? "es" : "en"); wordsInit(); });
+
+  // horizontal accordion: hover or focus expands a slice
+  var slices = [].slice.call(document.querySelectorAll("#acc .slice"));
+  slices.forEach(function (s) { ["mouseenter", "focus", "click"].forEach(function (ev) { s.addEventListener(ev, function () { slices.forEach(function (x) { x.classList.toggle("on", x === s); }); }); }); });
+
+  // scrubbing statement: split into words, opacity 0.12 -> 1 as the section scrolls through
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches, built = {};
+  function wordsInit() {
+    if (!window.gsap || !window.ScrollTrigger || reduce) return;
+    var el = document.getElementById(html.dataset.lang === "es" ? "statement-es" : "statement");
+    if (!el || built[el.id]) return;
+    built[el.id] = true;
+    el.innerHTML = el.textContent.split(" ").map(function (w) { return "<span>" + w + "</span>"; }).join(" ");
+    gsap.to(el.querySelectorAll("span"), { opacity: 1, stagger: 0.12, ease: "none", scrollTrigger: { trigger: el, start: "top 80%", end: "bottom 45%", scrub: true } });
+  }
+  window.addEventListener("load", function () {
+    if (window.gsap && window.ScrollTrigger) {
+      gsap.registerPlugin(ScrollTrigger);
+      wordsInit();
+      if (!reduce) gsap.utils.toArray(".fact").forEach(function (f) { gsap.from(f, { y: 60, opacity: 0, duration: 0.9, ease: "power3.out", scrollTrigger: { trigger: f, start: "top 88%" } }); });
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -51,6 +51,12 @@ def status(root):
                 size += os.path.getsize(p)
             except OSError:
                 pass
+        by = {}
+        for n in d.get("nodes", []):
+            if n.get("community") is not None:
+                grp = by.setdefault(n["community"], {"name": n.get("community_name") or f"group {n['community']}", "nodes": 0})
+                grp["nodes"] += 1
+        out["groups"] = sorted(by.values(), key=lambda x: -x["nodes"])[:8]          # the biggest groups: a quick picture of how the code is organised
         out.update(nodes=len(d.get("nodes", [])), edges=len(d.get("links", d.get("edges", []))), files=len(srcs),
                    source_tokens=_tokens(size), updated=int(os.path.getmtime(g)),
                    communities=len({n.get("community") for n in d.get("nodes", []) if n.get("community") is not None}))

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "npu-lab",
+  "version": "0.1.0",
+  "identifier": "org.npulab.app",
+  "build": { "frontendDist": "./ui" },
+  "app": { "windows": [], "security": { "csp": null } },
+  "bundle": { "active": false, "icon": ["icons/icon.png"] }
+}

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=npu-lab
+Comment=Private AI assistant that runs on your NPU
+Exec=env NPU_LAB_ROOT=%h/Documentos/Codigo/npu-lab %h/Documentos/Codigo/npu-lab/app/target/release/npu-lab-app
+Icon=npu-lab
+Terminal=false
+Categories=Utility;Development;

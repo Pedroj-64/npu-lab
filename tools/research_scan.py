@@ -1,6 +1,6 @@
 """Continuous research: look for new public work on first-generation NPUs (XDNA1 / npu1) and log it in docs/RESEARCH_LOG.md.
 usage: python tools/research_scan.py [--dry-run] [--classify] [--selftest]
---classify: the NPU model (Qwen3-0.6B, needs the NPU free) tags each NEW hit relevant / off-topic as a hint; the status stays `unverified`.
+--classify: the NPU model (Qwen3-1.7B, needs the NPU free) tags each NEW hit relevant / off-topic as a hint; the status stays `unverified`.
 Privacy: only the fixed search keywords below leave the machine; no code, paths or user content. GitHub token is optional
 (env GITHUB_TOKEN or ~/.config/npu-lab/github_token) and only raises the rate limit. New hits enter as `unverified`; the manual table is never edited.
 Spanish: busca trabajo público nuevo sobre NPU de primera generación y lo anota en docs/RESEARCH_LOG.md (sin verificar).
@@ -107,14 +107,17 @@ def main():
     if BEGIN not in text or END not in text:
         sys.exit("markers missing in docs/RESEARCH_LOG.md")
     found, engine = hits(), None
-    if a.classify:
+    if a.classify and any(u not in text for u in found):      # nothing new: do not load a model for nothing
         import subprocess
         if subprocess.run("pgrep -af 'src/(serve|chat_cli|qwen)|bench/(perf_baseline|energy|watch)' | grep -v pgrep", shell=True, capture_output=True).stdout:
             print("NPU busy: not classifying", file=sys.stderr)
         else:
             sys.path.insert(0, os.path.join(ROOT, "src"))
-            import qwen_npu
-            engine = qwen_npu.Qwen(os.path.join(ROOT, "models/qwen3s"), gpu=False)
+            try:
+                import qwen_npu
+                engine = qwen_npu.Qwen(os.path.join(ROOT, "models/qwen3"), gpu=False)     # the 1.7B: the one the hints were checked with
+            except Exception as e:                       # e.g. the external drive with the models is not mounted: the rules still label what they can
+                print(f"no model, rules only: {type(e).__name__}: {e}", file=sys.stderr)
     new_text, added = merge(text, found, time.strftime("%Y-%m-%d"), label_hits(found, text, engine))
     print(f"{added} new")
     if added and not a.dry_run:

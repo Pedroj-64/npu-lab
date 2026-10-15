@@ -107,6 +107,9 @@ try:
           and "print(1)" in "".join(l.get("token", "") for l in lines) and lines[-1].get("done") and KEY not in body.decode())
     check("docs_gate rule: only a boolean is accepted", call("POST", "/rules", {"docs_gate": "yes"})[0] == 400 and call("POST", "/rules", {"docs_gate": True})[0] == 200)
     check("measurement log is served", isinstance(json.loads(call("GET", "/bench")[1]).get("history"), list))
+    sv = json.loads(call("GET", "/sentinel")[1])
+    check("sentinel scan is served", isinstance(sv.get("events"), list) and "service" in sv and sv["roots"])
+    check("sentinel roots outside the home are refused", call("POST", "/rules", {"sentinel_roots": ["/etc"]})[0] == 400)
     check("chat without a loaded model -> 409", call("POST", "/chat", {"prompt": "hi"})[0] == 409)
     check("oversized body -> 413", call("POST", "/profile", None, headers={"Content-Length": "9999999"})[0] in (413, 400))
 

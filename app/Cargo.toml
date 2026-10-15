@@ -1,0 +1,18 @@
+[package]
+name = "npu-lab-app"
+version = "0.1.0"
+edition = "2021"
+description = "Desktop window for npu-lab: starts the local engine server and shows the web UI in its own window"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+getrandom = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

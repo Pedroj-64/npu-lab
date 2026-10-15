@@ -174,6 +174,17 @@ def set_rules(d):
                 raise Bad(400, f"must be an existing folder inside your home (use ~ for the whole home): {x}")
             clean.append("~" + real[len(home):])
         r["roots"] = clean
+    if "sentinel_roots" in d:
+        roots = d["sentinel_roots"]
+        if not isinstance(roots, list) or not 1 <= len(roots) <= 20:
+            raise Bad(400, "sentinel_roots: 1..20 folders")
+        clean = []
+        for x in roots:
+            real = os.path.realpath(os.path.expanduser(str(x)))
+            if not (real.startswith(home + os.sep)) or not os.path.isdir(real):
+                raise Bad(400, f"must be an existing folder inside your home: {x}")
+            clean.append("~" + real[len(home):])
+        r["sentinel_roots"] = clean
     if "docs_gate" in d:
         if not isinstance(d["docs_gate"], bool):
             raise Bad(400, "docs_gate must be true or false")
@@ -542,6 +553,13 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/settings":
             import settings
             self._send(200, settings.masked(settings.load()))
+        elif self.path == "/sentinel":           # repos with work left half done (git only); the same scan the background service runs
+            import sentinel, search
+            roots = search.rules().get("sentinel_roots") or ["~/Documentos/Codigo"]
+            svc = subprocess.run(["systemctl", "--user", "is-active", "npu-sentinel.service"], capture_output=True, text=True).stdout.strip() or "unknown"
+            evs = sentinel.events(roots)
+            self._send(200, {"roots": roots, "service": svc, "scanned": int(time.time()),
+                             "events": [{**e, "name": os.path.basename(e["repo"]), "repo": "~" + e["repo"][len(os.path.expanduser("~")):] if e["repo"].startswith(os.path.expanduser("~")) else e["repo"]} for e in evs]})
         elif self.path == "/bench":              # continuous measurement: the log of bench/watch.py and the state of a running measurement
             import bench_job
             self._send(200, bench_job.state())

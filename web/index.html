@@ -186,6 +186,16 @@
     <div class="code" id="gout" style="display:none"><div class="hd"><span>graph answer</span><button id="gcopy">Copy</button></div><pre id="gtext"></pre></div></div>
 </section>
 
+<section id="sentinel">
+  <div class="card"><h2>Left half done</h2>
+    <p class="note" style="margin:6px 0 0">Git repos with uncommitted files or commits that were never pushed. A background service checks every 30 minutes and sends one desktop notice per change. It uses git only: no model, no network, nothing from the NPU.</p>
+    <div class="row gap"><button class="b pri" id="sscan">Scan now</button><span class="dim" id="sstat"></span></div>
+    <div id="slist" style="margin-top:12px"></div></div>
+  <div class="card"><h2>Folders to watch</h2>
+    <p class="note" style="margin:6px 0 10px">One folder per line, inside your home. Repos are looked for two levels down. The background service reads its own list (<code>--roots</code> in <code>npu-sentinel.service</code>).</p>
+    <textarea id="sroots" rows="3" aria-label="Folders to watch"></textarea><div class="row gap"><button class="b" id="ssave">Save folders</button></div></div>
+</section>
+
 <section id="search">
   <div class="card"><h2>Search by meaning</h2>
     <p class="note" style="margin:6px 0 0">Finds files by what they say, not by the exact words. Runs on your NPU and never leaves the PC.</p>
@@ -356,9 +366,9 @@ function renderMsg(msg) {                                    // msg: {body, text
 }
 
 // ---------------------------------------------------------------- tabs / status
-const TABS = [["setup", "Setup"], ["chat", "Chat"], ["project", "Project"], ["search", "Search"], ["measure", "Measurements"], ["settings", "Settings"]];
+const TABS = [["setup", "Setup"], ["chat", "Chat"], ["project", "Project"], ["sentinel", "Sentinel"], ["search", "Search"], ["measure", "Measurements"], ["settings", "Settings"]];
 TABS.forEach(([id, name]) => { const b = mk("button", "", name); b.onclick = () => show(id); b.dataset.t = id; $("nav").append(b); });
-function show(id) { if (id === "project" && typeof graphRefresh === "function") graphRefresh(); if (id === "measure" && typeof measureRefresh === "function") measureRefresh(); TABS.forEach(([t]) => $(t).classList.toggle("on", t === id)); [...$("nav").children].forEach(b => { b.classList.toggle("on", b.dataset.t === id); b.toggleAttribute("aria-current", b.dataset.t === id); }); }
+function show(id) { if (id === "project" && typeof graphRefresh === "function") graphRefresh(); if (id === "measure" && typeof measureRefresh === "function") measureRefresh(); if (id === "sentinel" && typeof sentinelRefresh === "function") sentinelRefresh(); TABS.forEach(([t]) => $(t).classList.toggle("on", t === id)); [...$("nav").children].forEach(b => { b.classList.toggle("on", b.dataset.t === id); b.toggleAttribute("aria-current", b.dataset.t === id); }); }
 async function refresh() {
   try { ST = await api("/status"); } catch (e) { $("pill").dataset.s = "off"; $("pill").textContent = "no connection"; return; }
   $("pill").dataset.s = ST.busy ? "busy" : ST.mode === "none" ? "off" : "on";
@@ -537,7 +547,12 @@ async function graphRefresh() {
     $("gjob").textContent = running ? "building…" : j.state === "error" ? "failed: " + (j.msg || "").split("\n").pop() : j.state === "done" ? `built in ${j.seconds}s` : "";
     if (!g.built) { box.append(mk("div", "dim", "No map yet. Press “Build or refresh the map”.")); }
     else { const dl = mk("div", "opts"); for (const [k, v] of [["Files", g.files], ["Nodes", g.nodes], ["Connections", g.edges], ["Groups", g.communities], ["Source size", "~" + g.source_tokens.toLocaleString() + " tokens"], ["Updated", fmtAge(g.updated)]])
-      { const c = mk("div"); c.append(mk("div", "dim", k), mk("div", "", String(v))); c.firstChild.style.fontSize = "12.5px"; c.lastChild.style.cssText = "font:600 20px var(--serif);font-variant-numeric:tabular-nums"; dl.append(c); } box.append(dl); }
+      { const c = mk("div"); c.append(mk("div", "dim", k), mk("div", "", String(v))); c.firstChild.style.fontSize = "12.5px"; c.lastChild.style.cssText = "font:600 20px var(--serif);font-variant-numeric:tabular-nums"; dl.append(c); } box.append(dl);
+      if (g.groups && g.groups.length) { const gb = mk("div"); gb.style.marginTop = "18px"; gb.append(mk("div", "dim", "Biggest groups of connected code"));
+        const mx = g.groups[0].nodes; for (const x of g.groups) { const row = mk("div"); row.style.cssText = "display:grid;grid-template-columns:minmax(120px,220px) 1fr 56px;gap:10px;align-items:center;margin-top:8px;font-size:13.5px";
+          const bar = mk("div", "bar"), fill = mk("i"); fill.style.width = (x.nodes / mx * 100) + "%"; bar.append(fill);
+          const nm = mk("span", "", x.name); nm.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap"; nm.title = x.name;
+          const ct = mk("span", "dim", String(x.nodes)); ct.style.textAlign = "right"; row.append(nm, bar, ct); gb.append(row); } box.append(gb); } }
     if (running) GTIMER = setTimeout(graphRefresh, 1200);
   } catch (e) { $("gstat").textContent = ""; $("gstat").append(mk("div", "dim", e.message)); }
 }
@@ -553,6 +568,24 @@ $("gask").onclick = async () => {
   } catch (e) { $("gsave").textContent = e.message; } $("gask").disabled = false;
 };
 $("gcopy").onclick = async () => { try { await navigator.clipboard.writeText($("gtext").textContent); $("gcopy").textContent = "Copied ✓"; setTimeout(() => $("gcopy").textContent = "Copy", 1500); } catch (e) { toast("Could not copy"); } };
+
+// ---------------------------------------------------------------- sentinel (git, no model)
+async function sentinelRefresh() {
+  $("sscan").disabled = true; $("sstat").textContent = "scanning…";
+  try {
+    const r = await api("/sentinel"); const box = $("slist"); box.textContent = "";
+    if (document.activeElement !== $("sroots")) $("sroots").value = r.roots.join("\n");
+    $("sstat").textContent = `${r.events.length} repo${r.events.length === 1 ? "" : "s"} with pending work · background service: ${r.service}` + (r.service === "active" ? "" : " (enable it: see tools/systemd/README.md)");
+    if (!r.events.length) box.append(mk("div", "dim", "Everything is committed and pushed."));
+    for (const e of r.events) {
+      const row = mk("div", "res"), parts = [e.dirty && `${e.dirty} uncommitted`, e.ahead && `${e.ahead} unpushed`].filter(Boolean).join(" · ");
+      row.append(mk("div", "path", e.name), mk("div", "", parts), mk("div", "snip", e.repo)); box.append(row);
+    }
+  } catch (e) { $("sstat").textContent = e.message; }
+  $("sscan").disabled = false;
+}
+$("sscan").onclick = sentinelRefresh;
+$("ssave").onclick = async () => { try { const r = await api("/rules", { sentinel_roots: $("sroots").value.split("\n").map(x => x.trim()).filter(Boolean) }); $("sroots").value = r.sentinel_roots.join("\n"); toast("Folders saved"); sentinelRefresh(); } catch (e) { toast(e.message); } };
 
 // ---------------------------------------------------------------- measurements (bench/watch.py)
 let MTIMER = 0;

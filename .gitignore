@@ -10,3 +10,5 @@ bench/real_questions*.jsonl
 
 # raw intermediate results (kept locally, cited by reports)
 bench/.*
+app/target/
+app/gen/
