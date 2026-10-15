@@ -133,7 +133,7 @@ def _chunks(pages):
     import docs
     out = []
     for p, t, ocr in pages:
-        for c in docs.chunk(t, CHUNK):
+        for c in docs.chunk_headed(t, CHUNK):
             out.append({"page": p, "text": c, "ocr": ocr})
     return out[:MAX_CHUNKS]
 

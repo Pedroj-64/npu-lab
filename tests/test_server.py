@@ -105,6 +105,8 @@ try:
     lines = [json.loads(x) for x in body.decode().splitlines() if x]
     check("cloud chat streams think + token + done without any local model", s == 200 and any(l.get("think") == "hmm" for l in lines)
           and "print(1)" in "".join(l.get("token", "") for l in lines) and lines[-1].get("done") and KEY not in body.decode())
+    check("docs_gate rule: only a boolean is accepted", call("POST", "/rules", {"docs_gate": "yes"})[0] == 400 and call("POST", "/rules", {"docs_gate": True})[0] == 200)
+    check("measurement log is served", isinstance(json.loads(call("GET", "/bench")[1]).get("history"), list))
     check("chat without a loaded model -> 409", call("POST", "/chat", {"prompt": "hi"})[0] == 409)
     check("oversized body -> 413", call("POST", "/profile", None, headers={"Content-Length": "9999999"})[0] in (413, 400))
 
@@ -128,6 +130,7 @@ try:
         s, body = call("POST", "/chat", {"prompt": "What is my name? One word.", "tokens": 8, "docs": False, "web": False, "history": h})
         st = json.loads(body.decode().splitlines()[-1])["stats"]
         check(f"next turn reuses the start of the previous prompt ({st['reused_tokens']} of {st['prefill_tokens']} tokens)", st["reused_tokens"] > 20)
+        check("a measurement is refused while a model is loaded", call("POST", "/bench/run", {})[0] == 409)
         check("switch to search frees the NPU and loads the embedder", call("POST", "/mode", {"mode": "search", "device": "npu"})[0] == 200)
         s, body = call("POST", "/search", {"query": "servidor PHP base de datos", "n": 3})
         res = json.loads(body).get("results", [])

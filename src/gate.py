@@ -1,7 +1,7 @@
-"""Injection gate for the local docs retrieval: should ANY excerpt be injected for this question? Candidate, OFF by default: nothing imports it, `docs.retrieve` is untouched.
+"""Injection gate for the local docs retrieval: should ANY excerpt be injected for this question? Measured in bench/FASE56.md (all pre-registered margins met); wired in serve.py behind the `docs_gate` rule.
 A logistic model over a few features of the retrieval itself; abstention = return no excerpts when the probability is below the calibrated threshold.
-The weights and the threshold come from bench/gate_eval.py (fit on the tuning split only)."""
-import re
+The weights and the threshold come from bench/gate_eval.py (fit on the tuning split only). Used by serve.py when the rule `docs_gate` is on (default)."""
+import json, os, re
 import numpy as np
 import docs, hybrid
 
@@ -9,6 +9,22 @@ CUES = set(hybrid.fold("""terminal comando comandos command commands shell bash 
 archivo archivos carpeta directorio folder directory proceso process puerto port permisos permissions disco disk particion partition kernel sudo root usuario user red network wifi ssh
 flag opcion option linea script cron journal logs log mount montar usb""").split())
 NAMES = ["cos_max", "cos_gap", "title_cmd_cue", "title_cmd_nocue", "log_bm25", "wiki_top", "n_content", "cue_count"]
+
+
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gate_model.json")      # fitted by bench/gate_eval.py on the tuning split only
+_M = {}
+
+
+def load_model():
+    if "A" not in _M:
+        _M["A"] = json.load(open(MODEL_PATH))["A"]       # candidate A (8 features); the ablation B is only in bench/gate_model.json
+    return _M["A"]
+
+
+def allow(idx, bm, q_emb, query):
+    """True when excerpts from the local docs should be injected for this question (probability >= the calibrated threshold t)."""
+    m = load_model()
+    return bool(prob(m, features(idx, bm, q_emb, query)) >= m["t"])
 
 
 _N = {}

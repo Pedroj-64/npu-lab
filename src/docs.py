@@ -34,6 +34,34 @@ def chunk(text, size=CHUNK, max_n=None):
     return out[:max_n] if max_n else out
 
 
+def chunk_headed(text, size=CHUNK):
+    """Like chunk(), but a piece never mixes two sections and starts with its heading path ("Install > Arch"), so a piece taken out of a long
+    document still says what it is about. Markdown (#) and setext (=== / ---) headings; text without headings is split exactly like chunk()."""
+    lines, sections, path, cur, i = text.splitlines(), [], [], [], 0
+    def flush():
+        if "".join(cur).strip():
+            sections.append((" > ".join(path), "\n".join(cur)))
+        cur.clear()
+    while i < len(lines):
+        m = re.match(r"^(#{1,6})\s+(.+?)\s*#*\s*$", lines[i])
+        setext = i + 1 < len(lines) and lines[i].strip() and len(lines[i]) < 100 and re.fullmatch(r"=+|-{3,}", lines[i + 1].strip())
+        if m or setext:
+            flush()
+            level, title = (len(m[1]), m[2]) if m else (1 if lines[i + 1].strip()[0] == "=" else 2, lines[i].strip())
+            del path[level - 1:]
+            path.extend([""] * (level - 1 - len(path)))
+            path.append(title)
+            i += 1 if m else 2
+            continue
+        cur.append(lines[i]); i += 1
+    flush()
+    out = []
+    for head, body in sections:
+        pre = ("[" + " > ".join(x for x in head.split(" > ") if x) + "]\n") if head else ""
+        out += [pre + c for c in chunk(body, size)]
+    return out
+
+
 def tldr_docs():
     for lang in ("es", "en"):
         for sub in ("common", "linux"):

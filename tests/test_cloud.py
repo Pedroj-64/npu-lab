@@ -77,5 +77,21 @@ r = web.ddg("q", 5, {})
 check("duckduckgo parser", [x["url"] for x in r] == ["https://example.org/a", "https://example.net/b"] and r[0]["title"] == "Title A" and r[0]["snippet"] == "Snip A & more")
 ctx = web.as_context([dict(r[0], text="")], 50)
 check("web context shaping", ctx[0]["src"] == "web:example.org" and ctx[0]["kind"] == "web")
+import datetime
+check("dates are normalised", web._day("2026-09-30T12:00:00Z") == "2026-09-30" and web._day("nonsense") == "" and web._day("1850-01-01") == "")
+check("page date from meta, JSON-LD and <time>", web.find_date('<meta property="article:published_time" content="2026-03-02T10:00:00Z">') == "2026-03-02"
+      and web.find_date('{"datePublished":"2025-12-31"}') == "2025-12-31" and web.find_date('<time datetime="2024-07-01">') == "2024-07-01" and web.find_date("<p>none</p>") == "")
+rs = [{"url": "a", "date": "2020-01-01"}, {"url": "b", "date": ""}, {"url": "c", "date": "2026-10-01"}]
+check("recent mode sends old results last", [x["url"] for x in web.prefer_recent(rs, datetime.date(2026, 10, 15))] == ["b", "c", "a"])
+calls = []
+web.PROVIDERS["fake"] = lambda q, n, cfg: calls.append(q) or [{"title": "T", "url": "https://example.org/x", "snippet": "s"}]
+web.http = lambda *a, **k: (200, "text/html", b'<meta property="article:published_time" content="2026-10-01"><p>' + b"x" * 60 + b"</p>")
+web._CACHE.clear()
+r1, r2 = web.search("q", {"provider": "fake"}), web.search("q", {"provider": "fake"})
+check("same question within the cache time is answered from memory", len(calls) == 1 and r1[0]["date"] == "2026-10-01" and r2 == r1)
+for k in web._CACHE: web._CACHE[k] = (web._CACHE[k][0] - web.CACHE_SECONDS - 1, web._CACHE[k][1])
+web.search("q", {"provider": "fake"})
+check("the cache expires", len(calls) == 2)
+check("the date reaches the context", "Published: 2026-10-01" in web.as_context(r1)[0]["text"] and web.as_context(r1)[0]["date"] == "2026-10-01")
 srv.shutdown()
 sys.exit(1 if fails else 0)

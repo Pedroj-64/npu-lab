@@ -68,4 +68,5 @@ First automatic scan (2026-10-14) found XDNA1-specific work that changes the pla
 - 2026-10-14 · unverified · [michael-greider/xdna-stat — GUI NPU Monitoring in glorious and pure C only using IOCTL_DRM_AMDXDNA_GET_INFO, Linux kernel mainline recomme (updated 2026-08-07, 1 stars)](https://github.com/michael-greider/xdna-stat)
 - 2026-10-14 · unverified · [morta5/talos-kernel-amdxdna —  (updated 2026-10-12, 0 stars)](https://github.com/morta5/talos-kernel-amdxdna)
 - 2026-10-14 · unverified · [tibrezus/xdna-npu-toolkit — Detect, validate, enable and assess the AMD XDNA NPU on Linux. Dependency-free. Gives an honest, machine-speci (updated 2026-06-15, 2 stars)](https://github.com/tibrezus/xdna-npu-toolkit)
+- 2026-10-15 · unverified · [manupawickramasinghe/xdna1-ubuntu-suite — AMD XDNA1 (Ryzen AI npu1, 1022:1502) on Ubuntu: telemetry header, btop NPU panel, XRT installer and inference  (updated 2026-10-15, 0 stars)](https://github.com/manupawickramasinghe/xdna1-ubuntu-suite)
 <!-- research_scan:end -->

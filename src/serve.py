@@ -20,6 +20,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 MODELS = {"qwen3s": "models/qwen3s", "qwen3": "models/qwen3"}   # whitelist: the API never takes a path
 
 
+def docs_context(prompt, k=4):
+    """Local-docs excerpts for `prompt`. With the `docs_gate` rule (default on) a small measured model first decides whether the question is about
+    the terminal at all, so a translation or a general question gets no unrelated man page (bench/FASE56.md: injection on hard negatives 0.58 -> 0.02)."""
+    import docs, gate, hybrid, search
+    emb = S.cpu_embedder()
+    if search.rules().get("docs_gate", True):
+        if S.docs_bm is None:
+            S.docs_bm = hybrid.build(S.docs, stem=True)           # BM25 over the docs index, a few seconds, once
+        if not gate.allow(S.docs, S.docs_bm, emb.encode([prompt])[0], prompt):
+            return []
+    return docs.retrieve(emb, prompt, k, S.docs)
+
+
 def rules_view():
     """What GET /rules returns."""
     import search
@@ -100,7 +113,7 @@ class State:
         self.idx = None
         self.job = {"state": "idle"}              # index job status
         self.stop = threading.Event()
-        self.docs, self.embedder = None, None     # local documentation index + a CPU query embedder (~110 ms per question)
+        self.docs, self.embedder, self.docs_bm = None, None, None     # local documentation index + a CPU query embedder (~110 ms per question)
         self.emb_lock = threading.Lock()          # the CPU embedder is shared by chat retrieval and document import
         self.docjob = {"state": "idle"}           # import status of "my documents"
 
@@ -161,6 +174,10 @@ def set_rules(d):
                 raise Bad(400, f"must be an existing folder inside your home (use ~ for the whole home): {x}")
             clean.append("~" + real[len(home):])
         r["roots"] = clean
+    if "docs_gate" in d:
+        if not isinstance(d["docs_gate"], bool):
+            raise Bad(400, "docs_gate must be true or false")
+        r["docs_gate"] = d["docs_gate"]
     if "compact_at" in d:
         a = float(d["compact_at"])
         if not (a == 0 or 0.3 <= a <= 0.95):
@@ -525,6 +542,9 @@ class H(BaseHTTPRequestHandler):
         elif self.path == "/settings":
             import settings
             self._send(200, settings.masked(settings.load()))
+        elif self.path == "/bench":              # continuous measurement: the log of bench/watch.py and the state of a running measurement
+            import bench_job
+            self._send(200, bench_job.state())
         elif self.path == "/project/graph":      # state of the graphify map of the project folder
             import graph, search
             try:
@@ -554,6 +574,14 @@ class H(BaseHTTPRequestHandler):
             except documents.DocError as e:
                 raise Bad(400, str(e))
             self._send(200, {"documents": documents.listing()})
+        elif self.path == "/bench/run":          # one short measurement (bench/watch.py): needs the NPU, so never while a model is loaded
+            import bench_job
+            if S.mode != "none" or S.npu_lock.locked():
+                raise Bad(409, "Unload the model first: the measurement needs the NPU for ~1 minute.")
+            try:
+                self._send(202, bench_job.start())
+            except bench_job.BenchError as e:
+                raise Bad(409, str(e))
         elif self.path in ("/project/graph", "/project/graph/query"):      # graphify map: code only, no model, no network
             import graph, search
             root = search.rules().get("project_root", "")
@@ -705,7 +733,7 @@ class H(BaseHTTPRequestHandler):
                         if d.get("docs") != "auto":
                             self._line({"warning": "docs index not built: run `python src/docs.py --device gpu build`"})
                     else:
-                        ctx += [{**c, "kind": "docs"} for c in docs.retrieve(S.cpu_embedder(), prompt, 4, S.docs)]
+                        ctx += [{**c, "kind": "docs"} for c in docs_context(prompt)]
                 if use_mine:
                     import documents
                     self._line({"phase": "mine"})
@@ -714,11 +742,11 @@ class H(BaseHTTPRequestHandler):
                     self._line({"phase": "web"})
                     import web
                     try:
-                        ctx += web.as_context(router.clean_web(web.search(router.search_query(prompt, history), cfg["web"], cfg["web"]["results"] + 2, cfg["web"]["read"]))[:cfg["web"]["results"]])
+                        ctx += web.as_context(router.clean_web(web.search(router.search_query(prompt, history), cfg["web"], cfg["web"]["results"] + 2, cfg["web"]["read"], recent=auto["reason"] in ("time-sensitive", "classifier: web")))[:cfg["web"]["results"]])
                     except web.WebError as e:
                         self._line({"warning": f"web search failed: {e}"})
                 if ctx:
-                    self._line({"sources": [{"src": c["src"], "title": c.get("title", c["src"]), "url": c.get("url", ""), "kind": c["kind"]} for c in ctx]})
+                    self._line({"sources": [{"src": c["src"], "title": c.get("title", c["src"]), "url": c.get("url", ""), "date": c.get("date", ""), "kind": c["kind"]} for c in ctx]})
                 if cloud:
                     import cloud as cl
                     self._line({"phase": "asking", "provider": cfg["cloud"]["active"]})

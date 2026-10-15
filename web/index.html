@@ -203,7 +203,18 @@
     <textarea id="roots" rows="4"></textarea><div class="row gap"><button class="b" id="saveroots">Save folders</button></div></div>
 </section>
 
+<section id="measure">
+  <div class="card"><h2>Speed over time</h2>
+    <p class="note" style="margin:6px 0 0">A short benchmark of the NPU alone (Qwen3-0.6B, about a minute). Each run is added to <code>bench/history.jsonl</code>; a drop of more than 10 % against the last three runs is flagged, so a driver or kernel update that slows things down shows up. A weekly run can be switched on with the timer in <code>tools/systemd/</code>.</p>
+    <div class="row gap"><button class="b pri" id="mrun">Measure now</button><span class="dim" id="mjob"></span></div>
+    <div id="mchart" style="margin-top:16px"></div>
+    <div class="dim" id="mnote" style="margin-top:8px;font-variant-numeric:tabular-nums"></div></div>
+</section>
+
 <section id="settings">
+  <div class="card"><h2>Local documentation</h2>
+    <p class="note" style="margin:6px 0 0">When a question is not about the terminal (a translation, a general question), no man page or wiki excerpt is added to the prompt. Measured on a labelled set: unrelated excerpts dropped from 8 of 13 negative questions to 2 of 13, with no loss on the positive ones (<code>bench/FASE56.md</code>).</p>
+    <label class="row gap" style="cursor:pointer"><input type="checkbox" id="docsgate"> Skip documentation excerpts for questions that are not about the terminal</label></div>
   <div class="card"><h2>Web search</h2>
     <div class="row gap">
       <label class="f">Provider<select id="wprov"><option value="duckduckgo">DuckDuckGo (no key)</option><option value="wikipedia">Wikipedia (no key)</option>
@@ -345,9 +356,9 @@ function renderMsg(msg) {                                    // msg: {body, text
 }
 
 // ---------------------------------------------------------------- tabs / status
-const TABS = [["setup", "Setup"], ["chat", "Chat"], ["project", "Project"], ["search", "Search"], ["settings", "Settings"]];
+const TABS = [["setup", "Setup"], ["chat", "Chat"], ["project", "Project"], ["search", "Search"], ["measure", "Measurements"], ["settings", "Settings"]];
 TABS.forEach(([id, name]) => { const b = mk("button", "", name); b.onclick = () => show(id); b.dataset.t = id; $("nav").append(b); });
-function show(id) { if (id === "project" && typeof graphRefresh === "function") graphRefresh(); TABS.forEach(([t]) => $(t).classList.toggle("on", t === id)); [...$("nav").children].forEach(b => { b.classList.toggle("on", b.dataset.t === id); b.toggleAttribute("aria-current", b.dataset.t === id); }); }
+function show(id) { if (id === "project" && typeof graphRefresh === "function") graphRefresh(); if (id === "measure" && typeof measureRefresh === "function") measureRefresh(); TABS.forEach(([t]) => $(t).classList.toggle("on", t === id)); [...$("nav").children].forEach(b => { b.classList.toggle("on", b.dataset.t === id); b.toggleAttribute("aria-current", b.dataset.t === id); }); }
 async function refresh() {
   try { ST = await api("/status"); } catch (e) { $("pill").dataset.s = "off"; $("pill").textContent = "no connection"; return; }
   $("pill").dataset.s = ST.busy ? "busy" : ST.mode === "none" ? "off" : "on";
@@ -385,6 +396,7 @@ async function doctor() {
       if (c.fix) d.append(mk("span", "fix", c.fix)); box.append(d); }
   } catch (e) { box.textContent = e.message; }
 }
+$("docsgate").onchange = async () => { try { await api("/rules", { docs_gate: $("docsgate").checked }); } catch (e) { toast(e.message); } };
 $("savelimits").onclick = async () => { try { await api("/rules", { llm_vram_gb: +$("vram").value, context_tokens: +$("ctxwin").value, compact_at: +$("compact").value / 100 }); window.RULES = await api("/rules"); $("limitnote").textContent = "saved; Unload and Load the model to apply"; } catch (e) { toast(e.message); } };
 document.querySelectorAll("input[name=prof]").forEach(r => r.onchange = async () => { try { const p = await api("/profile", { profile: r.value }); if (p.reload) toast("Reload the model (Unload, then Load) to apply this profile"); } catch (e) { toast(e.message); } refresh(); });
 $("recheck").onclick = doctor;
@@ -502,7 +514,7 @@ async function send(o = {}) {   // o: {prompt, docs, web, cloud} re-asks the sam
         if (m.compacted) { HISTORY = [{ role: "user", content: "[Notes of the earlier conversation]\n" + m.compacted.summary }, { role: "assistant", content: "Understood, I will use those notes." }, ...HISTORY.slice(-m.compacted.kept)];
           box.insertBefore(mk("div", "src", "Conversation compacted: older turns were summarised so the window stays free."), body); if (finished) saveChat(); }
         if (m.warning) { box.insertBefore(mk("div", "warn", m.warning), body); }
-        if (m.sources) { srcs.textContent = "sources: "; m.sources.forEach((s, k) => { if (k) srcs.append(", "); if (s.url && /^https?:/.test(s.url)) { const a = mk("a", "", s.src); a.href = s.url; a.target = "_blank"; a.rel = "noopener noreferrer"; srcs.append(a); } else srcs.append(s.src); }); }
+        if (m.sources) { srcs.textContent = "sources: "; m.sources.forEach((s, k) => { if (k) srcs.append(", "); if (s.url && /^https?:/.test(s.url)) { const a = mk("a", "", s.src + (s.date ? " · " + s.date : "")); a.href = s.url; a.target = "_blank"; a.rel = "noopener noreferrer"; srcs.append(a); } else srcs.append(s.src); }); }
         if (m.think) { msg.think += m.think; setPhase("Thinking"); draw(); }
         if (m.token) { if (!msg.text) setPhase(""); msg.text += m.token; draw(); }
         if (m.error) toast(m.error);
@@ -520,7 +532,7 @@ async function graphRefresh() {
   clearTimeout(GTIMER); const box = $("gstat");
   try {
     const g = await api("/project/graph"); box.textContent = "";
-    if (!g.available) { box.append(mk("div", "warn", "graphify is not installed. Install it, then press Build (the `graphify` command must be on PATH).")); $("gbuild").disabled = true; return; }
+    if (!g.available) { box.append(mk("div", "warn", "graphify is not installed (the `graphify` command must be on PATH). Ask still works with a built-in map of the Python files only, without connections.")); $("gbuild").disabled = true; return; }
     const j = g.job || {}, running = j.state === "running"; $("gbuild").disabled = running;
     $("gjob").textContent = running ? "building…" : j.state === "error" ? "failed: " + (j.msg || "").split("\n").pop() : j.state === "done" ? `built in ${j.seconds}s` : "";
     if (!g.built) { box.append(mk("div", "dim", "No map yet. Press “Build or refresh the map”.")); }
@@ -541,6 +553,33 @@ $("gask").onclick = async () => {
   } catch (e) { $("gsave").textContent = e.message; } $("gask").disabled = false;
 };
 $("gcopy").onclick = async () => { try { await navigator.clipboard.writeText($("gtext").textContent); $("gcopy").textContent = "Copied ✓"; setTimeout(() => $("gcopy").textContent = "Copy", 1500); } catch (e) { toast("Could not copy"); } };
+
+// ---------------------------------------------------------------- measurements (bench/watch.py)
+let MTIMER = 0;
+function sparkline(vals, label, unit) {
+  const W = 520, H = 90, P = 8, ns = "http://www.w3.org/2000/svg", mx = Math.max(...vals) * 1.1, mn = Math.min(...vals) * 0.9, sp = Math.max(mx - mn, 1e-9);
+  const pt = (v, i) => [P + (vals.length > 1 ? i * (W - 2 * P) / (vals.length - 1) : (W - 2 * P) / 2), H - P - (v - mn) / sp * (H - 2 * P)];
+  const wrap = mk("div"), svg = document.createElementNS(ns, "svg"); svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${label}: ${vals.map(v => v.toFixed(1)).join(", ")} ${unit}`); svg.style.cssText = "width:100%;max-width:640px;height:auto;display:block";
+  const line = document.createElementNS(ns, "polyline"); line.setAttribute("fill", "none"); line.setAttribute("stroke", "var(--acc)"); line.setAttribute("stroke-width", "2"); line.setAttribute("points", vals.map((v, i) => pt(v, i).join(",")).join(" ")); svg.append(line);
+  vals.forEach((v, i) => { const [x, y] = pt(v, i), c = document.createElementNS(ns, "circle"); c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", i === vals.length - 1 ? 4 : 2.5); c.setAttribute("fill", "var(--acc)"); svg.append(c); });
+  const head = mk("div", "dim", `${label}: ${vals[vals.length - 1].toFixed(1)} ${unit} (last of ${vals.length})`); head.style.fontSize = "13px";
+  wrap.append(head, svg); return wrap;
+}
+async function measureRefresh() {
+  clearTimeout(MTIMER);
+  try {
+    const m = await api("/bench"), j = m.job || {}, h = m.history || [], run = j.state === "running";
+    $("mrun").disabled = run;
+    $("mjob").textContent = run ? "measuring… about a minute" : j.state === "skipped" ? "skipped: the NPU is busy" : j.state === "regression" ? "slower than the last runs" : j.state === "error" ? "failed: " + (j.msg || "") : j.state === "done" ? "done" : "";
+    const box = $("mchart"); box.textContent = "";
+    if (!h.length) { box.append(mk("div", "dim", "No measurements yet. Unload the model, then press “Measure now”.")); $("mnote").textContent = ""; }
+    else { box.append(sparkline(h.map(r => r.decode), "Decode", "tok/s"), sparkline(h.map(r => r.prefill_256), "Reading a 256-token prompt", "tok/s"));
+      const l = h[h.length - 1]; $("mnote").textContent = `last: ${l.ts.replace("T", " ")} · ${l.model} · kernel ${l.kernel} · ${l.ac === "1" ? "plugged in" : "on battery"} · GPU ${l.gpu_pstate || "?"}${l.regression ? " · REGRESSION" : ""}`; }
+    if (run) MTIMER = setTimeout(measureRefresh, 3000);
+  } catch (e) { $("mchart").textContent = e.message; }
+}
+$("mrun").onclick = async () => { try { await api("/bench/run", {}); } catch (e) { toast(e.message); } measureRefresh(); };
 
 // ---------------------------------------------------------------- search
 $("loadsearch").onclick = async () => { $("loadsearch").disabled = true; $("sstate").textContent = "loading…";
@@ -654,7 +693,7 @@ addEventListener("drop", e => { e.preventDefault(); dragDepth = 0; $("chatcard")
   if (!TOKEN) { $("pill").textContent = "not signed in"; toast("Open the address printed by the launcher (its login link works once)."); return; }
   show("setup");
   try { const s = await api("/status"); for (const m of s.models) $("llmsel").append(new Option(({ qwen3: "Qwen3-1.7B · medium", qwen3s: "Qwen3-0.6B · fast" })[m] || m, m)); $("llmsel").value = s.models.includes("qwen3") ? "qwen3" : s.models[0];
-    { const rl = await api("/rules"); $("roots").value = rl.roots.join("\n"); $("vram").value = rl.llm_vram_gb ?? 4.0; $("ctxwin").value = rl.context_tokens ?? 80000; $("compact").value = Math.round((rl.compact_at ?? 0.7) * 100); window.RULES = rl; } } catch (e) { toast(e.message); }
+    { const rl = await api("/rules"); $("roots").value = rl.roots.join("\n"); $("vram").value = rl.llm_vram_gb ?? 4.0; $("ctxwin").value = rl.context_tokens ?? 80000; $("compact").value = Math.round((rl.compact_at ?? 0.7) * 100); window.RULES = rl; $("docsgate").checked = rl.docs_gate !== false; } } catch (e) { toast(e.message); }
   await loadSettings(); api("/rules").then(r => { $("savechats").checked = !!r.save_chats; if (r.project_root) { $("projroot").value = $("gpath").value = r.project_root; $("projnote").textContent = "project mode: the model sees a map of this folder (edits need your Apply)"; } }).catch(() => {}); api("/facts").then(r => { $("facts").value = r.facts.join("\n"); }).catch(() => {}); refreshChats(); doctor(); refresh(); pollDocs().catch(() => {}); setInterval(refresh, 1500);
 })();
 </script>

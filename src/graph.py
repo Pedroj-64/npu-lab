@@ -96,15 +96,33 @@ def _guard(fn):
             job.update(state="error", msg=f"{type(e).__name__}: {e}")
 
 
+def _py_tokens(root):
+    total = 0
+    for d, subs, names in os.walk(root):
+        subs[:] = [s for s in subs if not s.startswith(".") and s not in ("node_modules", "venv", "__pycache__", "build", "dist", "graphify-out")]
+        total += sum(os.path.getsize(os.path.join(d, f)) for f in names if f.endswith(".py"))
+    return _tokens(total)
+
+
+def fallback(root, budget):
+    """Without graphify: the built-in map of the Python files (src/repomap.py, stdlib only). Not a graph, no connections, other languages are not mapped."""
+    import repomap
+    text = repomap.build(root, max_chars=budget * 4)
+    t, st = _tokens(len(text)), _py_tokens(root)
+    return {"text": text, "tokens": t, "source_tokens": st, "saved_pct": max(0, round(100 * (1 - t / st))) if st else 0, "fallback": True}
+
+
 def query(root, question, budget=1500):
     """Compact answer from the graph. Returns {text, tokens, source_tokens, saved_pct}; tokens are estimates (chars / 4)."""
     root = check_root(root)
     q = " ".join(str(question).split())[:300]
     if not q:
         raise GraphError("write a question")
+    budget = max(200, min(int(budget), 8000))
+    if not available():
+        return fallback(root, budget)
     if not os.path.isfile(graph_file(root)):
         raise GraphError("build the graph first")
-    budget = max(200, min(int(budget), 8000))
     rc, out = _run(["graphify", "query", q.lstrip("-"), "--budget", str(budget), "--graph", graph_file(root)], QUERY_TIMEOUT)
     if rc != 0:
         raise GraphError(out[-300:] or "graphify query failed")

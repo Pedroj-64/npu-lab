@@ -4,5 +4,5 @@ Description=npu-lab weekly scan of public XDNA1/NPU work (search keywords only)
 [Service]
 Type=oneshot
 WorkingDirectory=%h/Documentos/Codigo/npu-lab
-ExecStart=/usr/bin/python tools/research_scan.py
+ExecStart=%h/Documentos/Codigo/npu-lab/.venv/bin/python tools/research_scan.py --classify
 Nice=10

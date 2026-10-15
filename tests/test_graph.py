@@ -33,3 +33,16 @@ try:
     print("ok", {k: st[k] for k in ("nodes", "edges", "files")}, "query tokens", r["tokens"], "source tokens", r["source_tokens"])
 finally:
     shutil.rmtree(root, ignore_errors=True)
+
+# fallback without graphify: the built-in Python map answers, flagged as a fallback
+import shutil as _sh
+root2 = tempfile.mkdtemp(prefix=".graph-test-", dir=graph.HOME)
+try:
+    open(os.path.join(root2, "m.py"), "w").write("def alpha(x):\n    '''Adds one.'''\n    return x + 1\n")
+    real = graph.available; graph.available = lambda: False
+    r = graph.query(root2, "what does alpha do")
+    graph.available = real
+    assert r["fallback"] and "alpha(x)" in r["text"] and r["source_tokens"] > 0, r
+    print("fallback ok")
+finally:
+    _sh.rmtree(root2, ignore_errors=True)
