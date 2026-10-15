@@ -5,6 +5,12 @@ Phase 0 decisions at the top. Labels in the old text: measured = in `bench/RESUL
 
 
 
+
+## Phases 2 and 3 closing decisions (2026-10-15) / Decisiones al cerrar las Fases 2 y 3
+- **Sentinel uses plain rules, not a classifier.** The events (uncommitted/unpushed work, work older than 3 days, failed user services) are exact facts from git and systemd; a model would add cost and errors. The model only words things on request (`/summary`, commit messages). Measured cost: +0.5 mW on average (`bench/sentinel_power.py`).
+- **The phone bridge goes through Telegram's servers** (not end-to-end encrypted). Mitigation: allow-list by user id, no command reads files or runs shell commands, secret values are never shown. Anyone who needs more privacy should not use it; the rest of npu-lab sends nothing out.
+- **Shared token and port.** The desktop app now uses `~/.config/npu-lab/token` and port 8765 (when free), like `./npu.sh`, so the bridge and editors can reach the same server.
+
 ## Phase 1 closing decisions (2026-10-15) / Decisiones al cerrar la Fase 1
 - **Docs injection gate ON by default** (`docs_gate` rule, switch in Settings): its pre-registered margins were met (`bench/FASE56.md`); re-measured on the labelled bank with the gate wired into the retrieval path (`bench/docs_gate_eval.py`): positives unchanged (49/79 all, 24/37 held-out), negatives that still get an excerpt 23/40 -> 6/40 (held-out 8/13 -> 2/13), "how do I make a class in TypeScript" no longer gets `tsc`. Caveat kept from FASE56: negatives are mine and templated; turn it off in Settings if it ever hides a page you needed.
 - **Cross-encoder reranker NOT adopted** (`bench/rerank_eval.py`, mmarco-mMiniLMv2-L12, top-20 pool, 79 positives): hit@4 0.633 -> 0.646, diff +0.013 with 95 % CI [-0.089, +0.114] against the pre-written margin of +0.05 with CI above 0; ~1 s per question on the CPU. The downloaded model (918 MB) was deleted. BM25 hybrid stays OFF (+0.038 earlier, below the margin).

@@ -16,7 +16,10 @@ sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-
 evs = sentinel.events([root]); names = {os.path.basename(e["repo"]): e for e in evs}
 assert set(names) == {"dirty", "ahead"}, names                     # clean repo is silent
 assert names["dirty"]["dirty"] == 2 and names["ahead"]["ahead"] == 1, names
-assert sentinel.text(names["dirty"]) == "dirty: 2 uncommitted"
+assert sentinel.text(names["dirty"]) == "dirty: 2 uncommitted", sentinel.text(names["dirty"])
+assert names["dirty"]["oldest_days"] == 0
+old = dict(names["dirty"], oldest_days=5); assert sentinel.text(old).endswith("(oldest change 5 days old)")
+assert "failed" in sentinel.text({"repo": "unit:x", "dirty": 0, "ahead": 0, "unit": "x.service"})
 fresh, seen = sentinel.new_only(evs, {}); assert len(fresh) == 2
 fresh2, seen = sentinel.new_only(evs, seen); assert fresh2 == [], "same state is not announced twice"
 open(os.path.join(dirty, "c.txt"), "w").write("z")

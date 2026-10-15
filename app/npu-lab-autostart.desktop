@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=npu-lab (tray)
+Comment=Starts npu-lab in the system tray; open the window from the tray icon
+Exec=env NPU_LAB_ROOT=%h/Documentos/Codigo/npu-lab %h/Documentos/Codigo/npu-lab/app/target/release/npu-lab-app --hidden
+Icon=npu-lab
+Terminal=false
+X-GNOME-Autostart-enabled=true

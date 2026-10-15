@@ -13,5 +13,8 @@ systemctl --user list-timers 'npu-*'
 - `npu-research` only sends search keywords to GitHub; set `GITHUB_TOKEN` (or `~/.config/npu-lab/github_token`) to avoid the unauthenticated rate limit. / solo envía palabras clave; un token evita el límite de peticiones.
 - Disable: `systemctl --user disable --now npu-bench.timer npu-research.timer`.
 
+## Phone bridge / Puente al celular
+`npu-telegram.service` runs `bridge/telegram_bridge.py` (see `bridge/README.md`; needs `~/.config/npu-lab/telegram.json`). `systemctl --user enable --now npu-telegram.service`.
+
 ## Sentinel / Centinela
 `npu-sentinel.service` runs `src/sentinel.py` in the background (a desktop notice when a repo has uncommitted or unpushed work; one notice per change). Enable with `systemctl --user enable --now npu-sentinel.service`; change `--roots` to your code folders first. / Avisa de repos con trabajo sin commitear o sin subir; ajusta `--roots` antes de activarlo.

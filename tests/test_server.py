@@ -110,6 +110,9 @@ try:
     sv = json.loads(call("GET", "/sentinel")[1])
     check("sentinel scan is served", isinstance(sv.get("events"), list) and "service" in sv and sv["roots"])
     check("sentinel roots outside the home are refused", call("POST", "/rules", {"sentinel_roots": ["/etc"]})[0] == 400)
+    check("helper refuses a repo outside the watched folders", call("POST", "/helpers/commit", {"repo": "/etc"})[0] == 400)
+    check("explain needs a loaded model", call("POST", "/helpers/explain", {"command": "ls -la"})[0] == 409)
+    check("unit names are validated", call("POST", "/helpers/triage", {"unit": "a; rm -rf /"})[0] == 400)
     check("chat without a loaded model -> 409", call("POST", "/chat", {"prompt": "hi"})[0] == 409)
     check("oversized body -> 413", call("POST", "/profile", None, headers={"Content-Length": "9999999"})[0] in (413, 400))
 
@@ -133,6 +136,8 @@ try:
         s, body = call("POST", "/chat", {"prompt": "What is my name? One word.", "tokens": 8, "docs": False, "web": False, "history": h})
         st = json.loads(body.decode().splitlines()[-1])["stats"]
         check(f"next turn reuses the start of the previous prompt ({st['reused_tokens']} of {st['prefill_tokens']} tokens)", st["reused_tokens"] > 20)
+        s, body = call("POST", "/helpers/explain", {"command": "ls -la"})
+        check("explain answers with the loaded model", s == 200 and len(json.loads(body)["answer"]) > 10)
         check("a measurement is refused while a model is loaded", call("POST", "/bench/run", {})[0] == 409)
         check("switch to search frees the NPU and loads the embedder", call("POST", "/mode", {"mode": "search", "device": "npu"})[0] == 200)
         s, body = call("POST", "/search", {"query": "servidor PHP base de datos", "n": 3})

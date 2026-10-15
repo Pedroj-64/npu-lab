@@ -1,11 +1,13 @@
 //! npu-lab desktop window (Tauri). Starts the local engine server (src/serve.py) exactly like `launcher/` does and shows its web UI in a native
 //! window instead of the browser. Closing the window stops the server, so the NPU is released.
 //! The server gets its access token in its environment and the window opens a one-time login code, never a long-lived secret on a command line.
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 fn rand_hex(bytes: usize) -> String {
     let mut b = vec![0u8; bytes];
@@ -30,12 +32,36 @@ fn parse_port(line: &str) -> Option<u16> {
         .chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok()
 }
 
+/// The access token shared with the phone bridge and editors: ~/.config/npu-lab/token (same file ./npu.sh uses), created with mode 600 if missing.
+fn token_from_file() -> Option<String> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let dir = PathBuf::from(std::env::var_os("HOME")?).join(".config/npu-lab");
+    let f = dir.join("token");
+    if let Ok(t) = std::fs::read_to_string(&f) {
+        let t = t.trim().to_string();
+        if t.len() >= 32 { return Some(t); }
+    }
+    std::fs::create_dir_all(&dir).ok()?;
+    let t = rand_hex(32);
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true).mode(0o600);
+    o.open(&f).ok()?.write_all(t.as_bytes()).ok()?;
+    Some(t)
+}
+
+/// 8765 (the port editors and the bridge expect) when it is free, otherwise a random one.
+fn fixed_port_free() -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", 8765)).is_ok()
+}
+
 struct Engine { child: Child }
 
 fn start_engine(root: &Path) -> Result<(Engine, u16, String), String> {
-    let token = std::env::var("NPU_LAB_TOKEN").ok().filter(|t| t.len() >= 32).unwrap_or_else(|| rand_hex(32));
+    let token = std::env::var("NPU_LAB_TOKEN").ok().filter(|t| t.len() >= 32).or_else(token_from_file).unwrap_or_else(|| rand_hex(32));
     let code = rand_hex(32);
-    let mut child = Command::new(find_python(root))
+    let mut cmd = Command::new(find_python(root));
+    if std::env::var_os("NPU_LAB_PORT").is_none() && fixed_port_free() { cmd.env("NPU_LAB_PORT", "8765"); }
+    let mut child = cmd
         .args(["-u", "src/serve.py"])
         .current_dir(root)
         .env("NPU_LAB_TOKEN", &token)
@@ -63,6 +89,7 @@ fn main() {
         .or_else(|| std::env::current_dir().ok().and_then(|d| find_root(&d)))
         .or_else(|| std::env::current_exe().ok().and_then(|e| find_root(&e)))
         .unwrap_or_else(|| { eprintln!("could not find the npu-lab folder (src/serve.py). Set NPU_LAB_ROOT."); std::process::exit(1) });
+    let hidden = std::env::args().any(|a| a == "--hidden");       // start in the tray only (used by the autostart entry)
     let engine: Arc<Mutex<Option<Engine>>> = Arc::new(Mutex::new(None));
     let engine_setup = Arc::clone(&engine);
 
@@ -70,7 +97,28 @@ fn main() {
         .setup(move |app| {
             // the start page shows while the engine boots (it can take a few seconds)
             let win = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("npu-lab").inner_size(1180.0, 860.0).min_inner_size(380.0, 560.0).build()?;
+                .title("npu-lab").inner_size(1180.0, 860.0).min_inner_size(380.0, 560.0).visible(!hidden).build()?;
+            // tray: left click shows or hides the window, the menu has Show and Quit; closing the window only hides it (the server keeps running)
+            let show = MenuItem::with_id(app, "show", "Show npu-lab", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit (frees the NPU)", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let mut tray = TrayIconBuilder::new().tooltip("npu-lab").menu(&menu).show_menu_on_left_click(false)
+                .on_menu_event(|app, ev| match ev.id.as_ref() {
+                    "show" => { if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); } }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, ev| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev {
+                        if let Some(w) = tray.app_handle().get_webview_window("main") {
+                            if w.is_visible().unwrap_or(false) { let _ = w.hide(); } else { let _ = w.show(); let _ = w.set_focus(); }
+                        }
+                    }
+                });
+            if let Some(icon) = app.default_window_icon() { tray = tray.icon(icon.clone()); }
+            tray.build(app)?;
+            let w2 = win.clone();
+            win.on_window_event(move |ev| if let WindowEvent::CloseRequested { api, .. } = ev { api.prevent_close(); let _ = w2.hide(); });
             let root = root.clone();
             let handle = app.handle().clone();
             std::thread::spawn(move || match start_engine(&root) {

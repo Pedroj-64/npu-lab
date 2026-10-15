@@ -1,0 +1,12 @@
+[Unit]
+Description=npu-lab phone bridge (Telegram bot for the allowed user ids only)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python %h/Documentos/Codigo/npu-lab/bridge/telegram_bridge.py
+Restart=on-failure
+RestartSec=15
+Nice=10
+
+[Install]
+WantedBy=default.target

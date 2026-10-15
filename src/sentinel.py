@@ -5,6 +5,7 @@ Spanish: centinela de repos: avisa de trabajo sin commitear o sin subir; solo gi
 import argparse, json, os, shutil, subprocess, sys, time
 
 STATE = os.path.expanduser("~/.local/share/npu-lab/sentinel.json")
+STALE_DAYS = 3        # uncommitted work older than this is called out: it is the kind most likely to be forgotten
 
 
 def git(repo, *args):
@@ -33,7 +34,24 @@ def inspect(repo):
     if st is None:
         return None
     ahead = git(repo, "rev-list", "--count", "@{u}..HEAD")      # None without an upstream: nothing to say about pushing
-    return {"repo": repo, "dirty": len([l for l in st.splitlines() if l]), "ahead": int(ahead) if ahead and ahead.isdigit() else 0}
+    files = [l[3:].strip().strip('"').rstrip("/") for l in st.splitlines() if l.strip()]
+    ages = []
+    for f in files:
+        try:
+            ages.append(os.path.getmtime(os.path.join(repo, f)))
+        except OSError:
+            pass                                                # deleted files have no age
+    return {"repo": repo, "dirty": len(files), "ahead": int(ahead) if ahead and ahead.isdigit() else 0,
+            "oldest_days": int((time.time() - min(ages)) / 86400) if ages else 0}
+
+
+def failed_units():
+    """Names of user systemd units in the failed state (e.g. the weekly benchmark crashed)."""
+    try:
+        r = subprocess.run(["systemctl", "--user", "--failed", "--no-legend", "--plain"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [l.split()[0] for l in r.stdout.splitlines() if l.strip()]
 
 
 def events(roots):
@@ -41,13 +59,15 @@ def events(roots):
 
 
 def text(e):
+    if e.get("unit"):
+        return f"service {e['unit']} failed (journalctl --user -u {e['unit']})"
     parts = ([f"{e['dirty']} uncommitted"] if e["dirty"] else []) + ([f"{e['ahead']} unpushed"] if e["ahead"] else [])
-    return f"{os.path.basename(e['repo'])}: " + ", ".join(parts)
+    return f"{os.path.basename(e['repo'])}: " + ", ".join(parts) + (f" (oldest change {e['oldest_days']} days old)" if e.get("oldest_days", 0) >= STALE_DAYS and e["dirty"] else "")
 
 
 def new_only(evs, seen):
     """Events whose state differs from the last time they were announced; returns (to_announce, updated_seen)."""
-    now = {e["repo"]: (e["dirty"], e["ahead"]) for e in evs}
+    now = {e["repo"]: (e["dirty"], e["ahead"], 1 if e.get("unit") else 0) for e in evs}
     fresh = [e for e in evs if list(seen.get(e["repo"], [])) != list(now[e["repo"]])]
     return fresh, {k: list(v) for k, v in now.items()}
 
@@ -64,7 +84,8 @@ def main():
             seen = json.load(open(STATE))
         except (OSError, ValueError):
             seen = {}
-        fresh, seen = new_only(events(a.roots), seen)
+        evs = events(a.roots) + [{"repo": "unit:" + u, "dirty": 0, "ahead": 0, "unit": u} for u in failed_units()]
+        fresh, seen = new_only(evs, seen)
         for e in fresh:
             print(text(e), flush=True)
             if not a.no_notify and shutil.which("notify-send"):

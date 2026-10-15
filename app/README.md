@@ -11,7 +11,9 @@ Menu entry: `cp npu-lab.desktop ~/.local/share/applications/` and copy `icons/ic
 
 ## Status
 - Done: window, server start/stop, one-time login code (no long-lived secret on a command line), start page while the engine boots, menu entry.
-- Not done: **tray icon, start with the session and keep running in the background.** The tray needs `libayatana-appindicator` (Arch: `sudo pacman -S libayatana-appindicator`), which is not installed here. Until then, closing the window quits the app. Packaging (AppImage/deb) needs `tauri-cli`.
+- Tray icon (needs `libayatana-appindicator`, Arch: `sudo pacman -S libayatana-appindicator`): left click shows or hides the window, the menu has Show and "Quit (frees the NPU)". Closing the window only hides it; the server keeps running.
+- Start with the session: copy `npu-lab-autostart.desktop` to `~/.config/autostart/npu-lab.desktop`. It starts with `--hidden` (tray only, no window). Remove that file to turn it off.
+- Not done: packaging (AppImage/deb), which needs `tauri-cli`.
 
 ---
 
@@ -26,4 +28,6 @@ Entrada de menú: copia `npu-lab.desktop` a `~/.local/share/applications/` y `ic
 
 ## Estado
 - Hecho: ventana, arranque y parada del servidor, código de acceso de un solo uso, página de inicio mientras arranca el motor, entrada de menú.
-- Falta: **icono de bandeja, arranque con la sesión y segundo plano.** La bandeja necesita `libayatana-appindicator` (`sudo pacman -S libayatana-appindicator`), que no está instalado. Mientras tanto, cerrar la ventana cierra la app. El empaquetado (AppImage/deb) necesita `tauri-cli`.
+- Icono de bandeja (necesita `libayatana-appindicator`): clic izquierdo muestra u oculta la ventana, el menú tiene Mostrar y «Quit (frees the NPU)». Cerrar la ventana solo la oculta; el servidor sigue.
+- Arranque con la sesión: copia `npu-lab-autostart.desktop` a `~/.config/autostart/npu-lab.desktop`. Arranca con `--hidden` (solo bandeja, sin ventana). Borra ese archivo para quitarlo.
+- Falta: empaquetado (AppImage/deb), que necesita `tauri-cli`.

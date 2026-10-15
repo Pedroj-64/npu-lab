@@ -23,6 +23,7 @@ cliente (web/index.html, launcher, app Tauri, VS Code por /v1, puente al celular
 ## Endpoints del servidor (`src/serve.py`, `[leído en código]`)
 GET: `/status`, `/v1/models`, `/routing`, `/documents`, `/rules`, `/facts`, `/chats`, `/doctor`, `/settings`.
 POST: `/login`, `/mode`, `/profile`, `/rules`, `/documents/upload`, `/documents/delete`, `/agent/run` (una acción; solo escribe con `confirm=true`), `/project/apply`, `/facts`, `/chats/save`, `/chats/load`, `/routing`, `/settings`, `/settings/models`, `/settings/test_web`, `/chat`, `/v1/chat/completions`, `/search`, `/index`, `/index/stop`.
+Ayudas: `POST /helpers/commit` (revisión de secretos + borrador de mensaje), `/helpers/explain`, `/helpers/triage` (`src/devhelpers.py`). Puente al celular: `bridge/telegram_bridge.py` habla con este servidor en 127.0.0.1:8765 con el token compartido.
 Centinela: `GET /sentinel` (escaneo git de las carpetas de la regla `sentinel_roots`). Ventana de escritorio: `app/` (Tauri, arranca `src/serve.py`).
 Mediciones (`src/bench_job.py`): `GET /bench` (registro de `bench/history.jsonl` y estado) y `POST /bench/run` (lanza `bench/watch.py`; rechazado con un modelo cargado). Regla `docs_gate` (activa por defecto) en `rules.json`: `src/gate.py` decide si se usan extractos de la documentación local.
 Mapa del proyecto (`src/graph.py`, graphify, solo código): `GET /project/graph` (estado), `POST /project/graph` (construir o refrescar en segundo plano), `POST /project/graph/query` (`{q, budget}`).

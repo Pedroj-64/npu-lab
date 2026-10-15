@@ -3,6 +3,14 @@
 What is built, with the numbers measured when it was built. Moved verbatim from the old `ROADMAP.md` (Oct 2026); what is still open lives in
 [`../ROADMAP.md`](../ROADMAP.md) and the reasons for not building things in [`DECISIONS.md`](DECISIONS.md). Newest measurements first in section 0.
 
+## Fases 2 y 3 del plan cerradas (15 oct 2026)
+- **Interfaz:** pestañas Project (con vista de grupos), Sentinel (repos pendientes y ayudas) y Measurements; página pública `site/` (EN/ES) con flujo de GitHub Pages.
+- **Ventana de escritorio** (`app/`, Tauri): bandeja registrada, ocultar al cerrar, arranque `--hidden`, token y puerto 8765 compartidos con el puente.
+- **Centinela:** además de repos, avisa de trabajo de más de 3 días y de servicios fallidos; coste medido +0.5 mW de media.
+- **Puente al celular** (`bridge/`): bot de Telegram con lista blanca; comandos `/status /repos /summary /commit /explain /log /bench /load /unload` y chat con el modelo local.
+- **Ayudas de programación** (`src/devhelpers.py`): revisión exacta de secretos antes del commit (nunca muestra el valor), borrador de mensaje, explicar comandos y leer logs de servicios.
+- **Bug encontrado por los tests:** `graph.status` pisaba una variable al añadir los grupos; corregido.
+
 ## Fase 1 del plan cerrada (15 oct 2026)
 - **T1.5 búsqueda:** la puerta de inyección (`src/gate.py`, medida en `bench/FASE56.md`) está conectada tras la regla `docs_gate` (por defecto activa, interruptor en Ajustes): negativos con extracto 23/40 → 6/40, positivos sin cambio (`bench/docs_gate_eval.py`); el caso «TypeScript → tsc» y el extracto `archwiki:Kitty` desaparecen. Reranker cross-encoder medido y **no adoptado** (+0.013, IC [-0.089, +0.114]). Chunking por encabezados (`docs.chunk_headed`) para documentos nuevos, sin ganancia demostrable.
 - **T1.6 web:** fecha de publicación (meta, JSON-LD, `<time>`; Wikipedia/Brave/SearXNG la dan en la API) en cada resultado y en el extracto; en preguntas sensibles al tiempo los resultados de más de 2 años van al final; caché de 15 min. Con Wikipedia, 3 de 3 preguntas de prueba salen con fecha; con DuckDuckGo muchas páginas no declaran fecha (p. ej. kernel.org) y DuckDuckGo limitó las peticiones durante la prueba. La fecha de Wikipedia es la de la última edición.

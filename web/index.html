@@ -191,6 +191,11 @@
     <p class="note" style="margin:6px 0 0">Git repos with uncommitted files or commits that were never pushed. A background service checks every 30 minutes and sends one desktop notice per change. It uses git only: no model, no network, nothing from the NPU.</p>
     <div class="row gap"><button class="b pri" id="sscan">Scan now</button><span class="dim" id="sstat"></span></div>
     <div id="slist" style="margin-top:12px"></div></div>
+  <div class="card" id="helpers"><h2>Developer helpers</h2>
+    <p class="note" style="margin:6px 0 0">Exact checks run locally (git and pattern matching, no model). The wording of a commit message or an explanation needs a model loaded in Chat.</p>
+    <div class="row gap"><input type="text" id="hcmd" class="grow" placeholder="Explain a shell command, e.g. tar -xzf a.tar.gz -C /tmp" aria-label="Command to explain"><button class="b" id="hexplain">Explain</button></div>
+    <div class="row gap"><input type="text" id="hunit" class="grow" placeholder="What did a user service log? e.g. npu-sentinel.service" aria-label="User service"><button class="b" id="htriage">Read its log</button></div>
+    <div id="hout" class="code" style="display:none;margin-top:14px"><div class="hd"><span id="hhead">result</span><button id="hcopy">Copy</button></div><pre id="htext"></pre></div></div>
   <div class="card"><h2>Folders to watch</h2>
     <p class="note" style="margin:6px 0 10px">One folder per line, inside your home. Repos are looked for two levels down. The background service reads its own list (<code>--roots</code> in <code>npu-sentinel.service</code>).</p>
     <textarea id="sroots" rows="3" aria-label="Folders to watch"></textarea><div class="row gap"><button class="b" id="ssave">Save folders</button></div></div>
@@ -579,11 +584,21 @@ async function sentinelRefresh() {
     if (!r.events.length) box.append(mk("div", "dim", "Everything is committed and pushed."));
     for (const e of r.events) {
       const row = mk("div", "res"), parts = [e.dirty && `${e.dirty} uncommitted`, e.ahead && `${e.ahead} unpushed`].filter(Boolean).join(" · ");
-      row.append(mk("div", "path", e.name), mk("div", "", parts), mk("div", "snip", e.repo)); box.append(row);
+      const old = e.dirty && e.oldest_days >= 3 ? ` · oldest change ${e.oldest_days} days old` : "";
+      const chk = mk("button", "b", "Check before committing"); chk.style.marginTop = "8px"; chk.onclick = () => helper("/helpers/commit", { repo: e.repo }, "Commit check · " + e.name, r =>
+        `${r.files.length} changed file(s)\n` + (r.secrets.length || r.secrets_untracked.length ? "POSSIBLE SECRETS (values are never shown):\n" + [...r.secrets.map(x => `- ${x.kind}, line ${x.line}`), ...r.secrets_untracked.map(x => `- ${x.kind} in ${x.file}`)].join("\n") + "\n\n" : "No secrets found.\n\n") + (r.message || r.note || ""));
+      row.append(mk("div", "path", e.name), mk("div", "", parts + old), mk("div", "snip", e.repo), chk); box.append(row);
     }
   } catch (e) { $("sstat").textContent = e.message; }
   $("sscan").disabled = false;
 }
+async function helper(path, body, head, fmt) {
+  $("hout").style.display = ""; $("hhead").textContent = head; $("htext").textContent = "working…"; $("helpers").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  try { $("htext").textContent = fmt(await api(path, body)); } catch (e) { $("htext").textContent = e.message; }
+}
+$("hexplain").onclick = () => { const c = $("hcmd").value.trim(); if (c) helper("/helpers/explain", { command: c }, "Explanation", r => r.answer); };
+$("htriage").onclick = () => { const u = $("hunit").value.trim(); if (u) helper("/helpers/triage", { unit: u }, "Log of " + u, r => r.answer); };
+$("hcopy").onclick = async () => { try { await navigator.clipboard.writeText($("htext").textContent); $("hcopy").textContent = "Copied ✓"; setTimeout(() => $("hcopy").textContent = "Copy", 1500); } catch (e) { toast("Could not copy"); } };
 $("sscan").onclick = sentinelRefresh;
 $("ssave").onclick = async () => { try { const r = await api("/rules", { sentinel_roots: $("sroots").value.split("\n").map(x => x.trim()).filter(Boolean) }); $("sroots").value = r.sentinel_roots.join("\n"); toast("Folders saved"); sentinelRefresh(); } catch (e) { toast(e.message); } };
 

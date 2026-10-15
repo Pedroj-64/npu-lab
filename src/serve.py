@@ -20,6 +20,21 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 MODELS = {"qwen3s": "models/qwen3s", "qwen3": "models/qwen3"}   # whitelist: the API never takes a path
 
 
+def complete(prompt, system=None, n=220):
+    """One short answer from the loaded local model (used by the helpers and the phone bridge); never more than one request at a time on the NPU."""
+    if S.mode != "llm":
+        raise Bad(409, "no model is loaded: load one first")
+    if not S.npu_lock.acquire(timeout=300):
+        raise Bad(409, "busy")
+    try:
+        out = "".join(S.engine.stream(prompt, n, None, [], None, system=system))
+    except ValueError as e:
+        raise Bad(400, f"{e} (too long for the loaded model)")
+    finally:
+        S.npu_lock.release()
+    return re.sub(r"<think>[\s\S]*?(</think>|$)", "", out).strip()
+
+
 def docs_context(prompt, k=4):
     """Local-docs excerpts for `prompt`. With the `docs_gate` rule (default on) a small measured model first decides whether the question is about
     the terminal at all, so a translation or a general question gets no unrelated man page (bench/FASE56.md: injection on hard negatives 0.58 -> 0.02)."""
@@ -592,6 +607,38 @@ class H(BaseHTTPRequestHandler):
             except documents.DocError as e:
                 raise Bad(400, str(e))
             self._send(200, {"documents": documents.listing()})
+        elif self.path.startswith("/helpers/"):  # developer helpers: exact checks locally, the wording by the loaded model
+            import devhelpers as dh, search
+            roots = search.rules().get("sentinel_roots") or ["~/Documentos/Codigo"]
+            try:
+                if self.path == "/helpers/commit":
+                    repo = dh.repo_ok(d.get("repo"), roots)
+                    files, diff = dh.pending_diff(repo)
+                    out = {"repo": os.path.basename(repo), "files": files[:40], "secrets": dh.secret_findings(diff), "secrets_untracked": dh.scan_untracked(repo), "message": ""}
+                    if not files:
+                        out["note"] = "nothing to commit"
+                    elif S.mode == "llm" and not out["secrets"] and not out["secrets_untracked"]:
+                        out["message"] = complete(dh.commit_prompt(files, diff), system="You write precise git commit messages.", n=120)
+                    elif out["secrets"] or out["secrets_untracked"]:
+                        out["note"] = "possible secrets found: fix that before committing (no message was drafted)"
+                    else:
+                        out["note"] = "load a model to draft the message"
+                    self._send(200, out)
+                elif self.path == "/helpers/explain":
+                    cmd = " ".join(str(d.get("command", "")).split())[:300]
+                    if not cmd:
+                        raise Bad(400, "write a command")
+                    ref = ""
+                    if S.docs_info() is not None:
+                        ref = "\n\n".join(f"[{c['src']}]\n{c['text']}" for c in docs_context(cmd, 2))
+                    self._send(200, {"command": cmd, "answer": complete(dh.explain_prompt(cmd, ref), system="You explain shell commands briefly and accurately.", n=200)})
+                elif self.path == "/helpers/triage":
+                    unit = str(d.get("unit", ""))
+                    self._send(200, {"unit": unit, "answer": complete(dh.triage_prompt(unit, dh.unit_log(unit)), system="You read service logs and say what matters.", n=200)})
+                else:
+                    raise Bad(404, "not found")
+            except dh.HelperError as e:
+                raise Bad(400, str(e))
         elif self.path == "/bench/run":          # one short measurement (bench/watch.py): needs the NPU, so never while a model is loaded
             import bench_job
             if S.mode != "none" or S.npu_lock.locked():
